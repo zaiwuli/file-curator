@@ -1,0 +1,24 @@
+.stat.blue .stat-value { color: #214f9c; }
+.stat.amber .stat-value { color: #a76417; }
+.stat.green .stat-value { color: #237b5b; }
+.stat.purple .stat-value { color: #6b4ba1; }
+.api-notice { border: 1px solid #e8c98f; background: #fff7e7; color: #79551d; border-radius: 5px; padding: 11px 14px; font-size: 10px; margin-bottom: 14px; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.icon-button { display: inline-grid; place-items: center; }
+.status-dot.loading { background: #d59a38; }
+.status-dot.fallback { background: #cc684e; }
+.status-dot.offline { background: #cc684e; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(15, 28, 38, .48); display: grid; place-items: center; z-index: 50; }
+.modal { width: 460px; background: #fff; border: 1px solid #d7dfe4; border-radius: 7px; padding: 22px; box-shadow: 0 18px 48px rgba(16, 29, 40, .24); }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; }
+.modal-head h2 { margin: 5px 0 0; font-size: 17px; }
+.checkbox-line { display: flex; gap: 8px; align-items: center; margin: 17px 0; font-size: 11px; }
+.form-error { padding: 9px 10px; color: #9f402d; background: #fbece8; border-radius: 4px; font-size: 10px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.empty-state { padding: 36px 18px; text-align: center; color: #60717c; font-size: 11px; }
+.review-main details { margin-top: 8px; }
+.review-main summary { cursor: pointer; color: #315a83; font-size: 10px; }
+.review-main pre { max-height: 220px; overflow: auto; padding: 10px; background: #f5f7f8; border: 1px solid #dfe5e8; border-radius: 4px; font-size: 9px; white-space: pre-wrap; }
+.operation-table code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-panel + .history-panel { margin-top: 14px; }

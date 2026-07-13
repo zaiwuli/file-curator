@@ -1,0 +1,15 @@
+{
+  "name": "file-curator",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "test:web": "npm --prefix apps/web run test",
+    "typecheck:web": "npm --prefix apps/web run typecheck"
+  }
+}
+

@@ -1,0 +1,303 @@
+import re
+import unicodedata
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+from typing import Any, ClassVar
+
+
+@dataclass(frozen=True)
+class ProcessorManifest:
+    id: str
+    version: str
+    category: str
+    requires: tuple[str, ...] = ()
+    provides: tuple[str, ...] = ()
+    default_enabled: bool = True
+    score_weight: float = 0.0
+    safety_class: str = "normal"
+
+
+@dataclass
+class ProcessingContext:
+    entry_id: str
+    relative_path: str
+    original_name: str
+    parent_path: str
+    extension: str
+    size: int
+    mtime_ns: int
+    fields: dict[str, Any] = field(default_factory=dict)
+    proposed_name: str | None = None
+    proposed_parent: str | None = None
+    confidence: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ProcessorResult:
+    status: str = "matched"
+    confidence_delta: float = 0.0
+    fields: dict[str, Any] = field(default_factory=dict)
+    proposed_name: str | None = None
+    proposed_parent: str | None = None
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+class Processor(ABC):
+    manifest: ClassVar[ProcessorManifest]
+
+    @abstractmethod
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        raise NotImplementedError
+
+
+class DateExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_date",
+        "1.0.0",
+        "extract",
+        provides=("date", "year", "month", "day"),
+        score_weight=0.25,
+    )
+    pattern = re.compile(
+        r"(?<!\d)(20\d{2})(?:[-_.]|\u5e74)(\d{1,2})(?:[-_.]|\u6708)(\d{1,2})(?:\u65e5)?(?!\d)"
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        match = self.pattern.search(context.original_name)
+        if not match:
+            return ProcessorResult(status="skipped")
+        try:
+            value = date(*(int(part) for part in match.groups()))
+        except ValueError:
+            return ProcessorResult(status="warning", warnings=["date.invalid"])
+        return ProcessorResult(
+            confidence_delta=self.manifest.score_weight,
+            fields={
+                "date": value.isoformat(),
+                "year": f"{value.year:04d}",
+                "month": f"{value.month:02d}",
+                "day": f"{value.day:02d}",
+            },
+            reasons=["date.full_date_matched"],
+        )
+
+
+class IdentifierExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_identifier", "1.0.0", "extract", provides=("identifier",), score_weight=0.25
+    )
+    default_pattern = re.compile(r"(?i)(?<![A-Z0-9])([A-Z]{2,10}-\d{2,10})(?![A-Z0-9])")
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        pattern = re.compile(options.get("pattern", self.default_pattern.pattern), re.IGNORECASE)
+        match = pattern.search(context.original_name)
+        if not match:
+            return ProcessorResult(status="skipped")
+        identifier = match.group(1).upper()
+        return ProcessorResult(
+            confidence_delta=0.25,
+            fields={"identifier": identifier},
+            reasons=["identifier.pattern_matched"],
+        )
+
+
+class SequenceExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_sequence", "1.0.0", "extract", provides=("sequence",), score_weight=0.15
+    )
+    pattern = re.compile(r"(?i)(?:\((\d{1,3})\)|\b(?:part|pt|cd|ep)[ ._-]?(\d{1,3})\b)")
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        match = self.pattern.search(Path(context.original_name).stem)
+        if not match:
+            return ProcessorResult(status="skipped")
+        number = int(match.group(1) or match.group(2))
+        return ProcessorResult(
+            confidence_delta=0.15, fields={"sequence": number}, reasons=["sequence.pattern_matched"]
+        )
+
+
+class QualityExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_quality", "1.0.0", "extract", provides=("resolution", "quality"), score_weight=0.1
+    )
+    pattern = re.compile(r"(?i)\b(720p|1080p|2160p|4k|web[- .]?dl|bluray|remux|hdr)\b")
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        values = [
+            m.group(1).lower().replace(" ", "-")
+            for m in self.pattern.finditer(context.original_name)
+        ]
+        if not values:
+            return ProcessorResult(status="skipped")
+        fields: dict[str, Any] = {"quality": values}
+        resolution = next((v for v in values if v in {"720p", "1080p", "2160p", "4k"}), None)
+        if resolution:
+            fields["resolution"] = resolution
+        return ProcessorResult(
+            confidence_delta=0.1, fields=fields, reasons=["quality.marker_matched"]
+        )
+
+
+class ParentContextExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_parent_context", "1.0.0", "extract", provides=("parent_name",), score_weight=0.05
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        parent = Path(context.parent_path).name if context.parent_path else ""
+        if not parent:
+            return ProcessorResult(status="skipped")
+        return ProcessorResult(
+            confidence_delta=0.05,
+            fields={"parent_name": parent},
+            reasons=["context.parent_available"],
+        )
+
+
+class CustomRegexExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_regex", "1.0.0", "extract", score_weight=0.1, safety_class="advanced"
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        pattern = options.get("pattern")
+        field_name = options.get("field", "custom")
+        if not pattern:
+            return ProcessorResult(status="skipped")
+        match = re.search(pattern, context.original_name)
+        if not match:
+            return ProcessorResult(status="skipped")
+        value = match.groupdict().get(field_name) if match.groupdict() else match.group(1)
+        return ProcessorResult(
+            confidence_delta=0.1, fields={field_name: value}, reasons=["custom_regex.matched"]
+        )
+
+
+class NameNormalizer(Processor):
+    manifest = ProcessorManifest(
+        "normalize_name", "1.0.0", "normalize", provides=("proposed_name",), score_weight=0.1
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        path = Path(context.proposed_name or context.original_name)
+        stem = unicodedata.normalize("NFC", path.stem)
+        for prefix in options.get("remove_prefixes", []):
+            if stem.lower().startswith(str(prefix).lower()):
+                stem = stem[len(str(prefix)) :]
+        for replacement in options.get("replacements", []):
+            stem = re.sub(
+                replacement.get("pattern", "(?!)"), replacement.get("replacement", ""), stem
+            )
+        stem = re.sub(r"\s+", " ", stem).strip(" ._-")
+        invalid = r'[<>:"/\\|?*\x00-\x1f]'
+        stem = re.sub(invalid, options.get("invalid_replacement", "_"), stem)
+        if not stem:
+            return ProcessorResult(status="warning", warnings=["name.empty_after_normalization"])
+        new_name = stem + path.suffix.lower()
+        if new_name == context.original_name:
+            return ProcessorResult(status="skipped")
+        return ProcessorResult(
+            confidence_delta=0.1, proposed_name=new_name, reasons=["name.normalized"]
+        )
+
+
+class TemplateTarget(Processor):
+    manifest = ProcessorManifest(
+        "target_template",
+        "1.0.0",
+        "target",
+        provides=("proposed_name", "proposed_parent"),
+        safety_class="review",
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        values = {
+            **context.fields,
+            "original_stem": Path(context.original_name).stem,
+            "extension": context.extension.lstrip("."),
+            "name": context.proposed_name or context.original_name,
+        }
+        warnings: list[str] = []
+        try:
+            name_template = options.get("name_template")
+            parent_template = options.get("parent_template")
+            name = name_template.format_map(values) if name_template else context.proposed_name
+            if name and not Path(name).suffix:
+                name += context.extension
+            parent = (
+                parent_template.format_map(values) if parent_template else context.proposed_parent
+            )
+        except KeyError as exc:
+            warnings.append(f"template.missing_field:{exc.args[0]}")
+            return ProcessorResult(status="review", warnings=warnings)
+        return ProcessorResult(
+            proposed_name=name, proposed_parent=parent, reasons=["target.template_rendered"]
+        )
+
+
+class JunkDetector(Processor):
+    manifest = ProcessorManifest(
+        "detect_junk", "1.0.0", "detect", provides=("junk_candidate",), score_weight=0.1
+    )
+    defaults = {".tmp", ".part", ".download", ".crdownload"}
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        extensions = set(options.get("extensions", self.defaults))
+        if context.extension.lower() not in extensions and context.size != 0:
+            return ProcessorResult(status="skipped")
+        return ProcessorResult(
+            confidence_delta=0.1, fields={"junk_candidate": True}, reasons=["junk.candidate"]
+        )
+
+
+class ProcessorRegistry:
+    def __init__(self) -> None:
+        self._processors: dict[str, Processor] = {}
+
+    def register(self, processor: Processor) -> None:
+        if processor.manifest.id in self._processors:
+            raise ValueError("processor.duplicate_id")
+        self._processors[processor.manifest.id] = processor
+
+    def get(self, processor_id: str) -> Processor:
+        try:
+            return self._processors[processor_id]
+        except KeyError as exc:
+            raise ValueError("processor.not_found") from exc
+
+    def manifests(self) -> list[ProcessorManifest]:
+        return [processor.manifest for processor in self._processors.values()]
+
+    def validate_order(self, processor_ids: list[str]) -> None:
+        available = {"filename", "relative_path", "parent_path", "extension", "size", "mtime_ns"}
+        for processor_id in processor_ids:
+            processor = self.get(processor_id)
+            missing = set(processor.manifest.requires) - available
+            if missing:
+                raise ValueError(
+                    f"processor.missing_dependencies:{processor_id}:{','.join(sorted(missing))}"
+                )
+            available.update(processor.manifest.provides)
+
+
+def create_default_registry() -> ProcessorRegistry:
+    registry = ProcessorRegistry()
+    for processor in (
+        DateExtractor(),
+        IdentifierExtractor(),
+        SequenceExtractor(),
+        QualityExtractor(),
+        ParentContextExtractor(),
+        CustomRegexExtractor(),
+        NameNormalizer(),
+        TemplateTarget(),
+        JunkDetector(),
+    ):
+        registry.register(processor)
+    return registry

@@ -1,0 +1,13 @@
+export type Page = 'dashboard' | 'sources' | 'pipeline' | 'review' | 'preview' | 'execution' | 'history' | 'settings'
+export type Source = { id: string; name: string; path: string; status: 'ready'|'offline'|'scanning'; files: number; size: string; lastScan: string }
+export type ApiSource = { id: string; name: string; root_path: string; enabled: boolean; read_only: boolean; exclusions: string[]; protected_paths: string[]; capabilities: Record<string, boolean|string> }
+export type ProcessorConfig = { id: string; enabled: boolean; options: Record<string, unknown> }
+export type ProcessorManifest = { id: string; version: string; category: string; requires: string[]; provides: string[]; default_enabled: boolean; score_weight: number; safety_class: string }
+export type Workflow = { id: string; name: string; preset: string; review_policy: string; current_revision: number }
+export type PipelineRun = { id: string; source_id: string; workflow_id: string; workflow_revision: number; status: string; summary: Record<string, number> }
+export type StageResult = { id: string; file_entry_id: string; processor_id: string; processor_version: string; status: string; confidence: number; input_data: Record<string, unknown>; output_data: Record<string, unknown>; reasons: string[]; warnings: string[] }
+export type PlanOperation = { id: string; sequence: number; kind: string; source_relative_path: string; target_relative_path: string; expected_size: number; expected_mtime_ns: number; reasons: string[]; reversible: boolean }
+export type PlanSummary = { id: string; run_id: string; source_id: string; status: string; frozen_at: string|null; confirmed_at: string|null; summary: Record<string, number>; operations: PlanOperation[] }
+export type Batch = { id: string; plan_id: string; status: string; succeeded: number; failed: number; skipped: number; error: string|null; completed_at: string|null }
+export type AuditLog = { id: string; batch_id: string|null; operation_id: string|null; event: string; status: string; details: Record<string, unknown>; created_at: string }
+export type Health = { status: string; version?: string }
