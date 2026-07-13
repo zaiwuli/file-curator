@@ -296,3 +296,32 @@ def test_online_backup_is_a_readable_sqlite_database(client) -> None:
     diagnostics = client.get("/api/diagnostics")
     assert diagnostics.status_code == 200
     assert diagnostics.json()["config_writable"] is True
+
+
+def test_content_hashing_is_opt_in_and_invalidated_on_change(client, media_root: Path) -> None:
+    (media_root / "first.bin").write_bytes(b"same-content")
+    (media_root / "second.bin").write_bytes(b"same-content")
+    source = client.post(
+        "/api/sources", json={"name": "Hashes", "root_path": str(media_root)}
+    ).json()
+    scan = client.post(
+        "/api/scans",
+        json={"source_id": source["id"], "mode": "full", "hash_contents": True},
+    ).json()
+    completed = wait_for(client, f"/api/scans/{scan['id']}", {"completed", "failed"})
+    assert completed["status"] == "completed"
+    duplicates = client.get(
+        "/api/duplicates", params={"source_id": source["id"], "method": "hash"}
+    ).json()
+    assert len(duplicates) == 1
+
+    (media_root / "second.bin").write_bytes(b"different-and-longer")
+    incremental = client.post(
+        "/api/scans",
+        json={"source_id": source["id"], "mode": "incremental"},
+    ).json()
+    wait_for(client, f"/api/scans/{incremental['id']}", {"completed", "failed"})
+    duplicates = client.get(
+        "/api/duplicates", params={"source_id": source["id"], "method": "hash"}
+    ).json()
+    assert duplicates == []

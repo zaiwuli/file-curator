@@ -40,6 +40,8 @@ DEFAULT_PROCESSORS = [
     ProcessorConfig(id="extract_sequence"),
     ProcessorConfig(id="extract_quality"),
     ProcessorConfig(id="extract_parent_context"),
+    ProcessorConfig(id="extract_language"),
+    ProcessorConfig(id="classify_extension"),
     ProcessorConfig(id="normalize_name"),
 ]
 
@@ -473,6 +475,26 @@ def create_backup(session: Session, settings: Settings) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     session.commit()
     with sqlite3.connect(database) as source_connection:
+        with sqlite3.connect(destination) as destination_connection:
+            source_connection.backup(destination_connection)
+    return destination
+
+
+def restore_backup(settings: Settings, filename: str) -> Path:
+    if Path(filename).name != filename:
+        raise DomainError("backup.invalid_filename")
+    source = settings.config_dir / "backups" / filename
+    if not source.is_file():
+        raise DomainError("backup.not_found", 404)
+    database_name = make_url(settings.resolved_database_url).database
+    if not database_name:
+        raise DomainError("backup.database_not_file")
+    destination = Path(database_name)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(source) as source_connection:
+        integrity = source_connection.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            raise DomainError("backup.integrity_failed")
         with sqlite3.connect(destination) as destination_connection:
             source_connection.backup(destination_connection)
     return destination

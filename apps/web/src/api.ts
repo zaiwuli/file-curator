@@ -35,7 +35,7 @@ export const api = {
   backups: () => request<Backup[]>('/backups'),
   diagnostics: () => request<Diagnostics>('/diagnostics'),
   createSource: (payload: { name: string; root_path: string; read_only: boolean }) => post<ApiSource>('/sources', { ...payload, exclusions: [], protected_paths: [] }),
-  createScan: (sourceId: string) => post<{ id: string; status: string }>('/scans', { source_id: sourceId, mode: 'full' }),
+  createScan: (sourceId: string, hashContents = false) => post<{ id: string; status: string }>('/scans', { source_id: sourceId, mode: 'full', hash_contents: hashContents }),
   files: (params: { sourceId: string; search?: string; extension?: string; limit?: number; offset?: number }) => {
     const query = new URLSearchParams({ source_id: params.sourceId, limit: String(params.limit ?? 100), offset: String(params.offset ?? 0) })
     if (params.search) query.set('search', params.search)

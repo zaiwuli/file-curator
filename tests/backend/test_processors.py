@@ -1,9 +1,12 @@
 from file_curator.processors import (
+    ClassificationProcessor,
     DateExtractor,
     IdentifierExtractor,
+    LanguageExtractor,
     NameNormalizer,
     ProcessingContext,
     SequenceExtractor,
+    SourcePrefixExtractor,
     TemplateTarget,
 )
 
@@ -53,3 +56,14 @@ def test_template_missing_field_requires_review() -> None:
     result = TemplateTarget().process(context("name.mp4"), {"parent_template": "{year}"})
     assert result.status == "review"
     assert result.warnings == ["template.missing_field:year"]
+
+
+def test_language_source_and_classification_extractors() -> None:
+    item = context("site.Movie.ENG.1080p.mkv")
+    language = LanguageExtractor().process(item, {})
+    source = SourcePrefixExtractor().process(item, {"prefixes": ["site."]})
+    classification = ClassificationProcessor().process(item, {})
+    assert language.fields == {"language": "en"}
+    assert source.fields == {"source_prefix": "site."}
+    assert classification.fields == {"category": "video"}
+    assert "markers" in LanguageExtractor.manifest.option_schema

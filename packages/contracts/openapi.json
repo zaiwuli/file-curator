@@ -168,6 +168,10 @@
             "title": "Version",
             "type": "string"
           },
+          "webhook_configured": {
+            "title": "Webhook Configured",
+            "type": "boolean"
+          },
           "worker_alive": {
             "title": "Worker Alive",
             "type": "boolean"
@@ -178,6 +182,7 @@
           "worker_alive",
           "database",
           "config_writable",
+          "webhook_configured",
           "counts"
         ],
         "title": "DiagnosticsRead",
@@ -933,6 +938,11 @@
       },
       "ScanCreate": {
         "properties": {
+          "hash_contents": {
+            "default": false,
+            "title": "Hash Contents",
+            "type": "boolean"
+          },
           "mode": {
             "default": "full",
             "enum": [
@@ -990,6 +1000,10 @@
             "title": "Errors",
             "type": "array"
           },
+          "hash_contents": {
+            "title": "Hash Contents",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -1016,6 +1030,7 @@
           "source_id",
           "status",
           "mode",
+          "hash_contents",
           "scanned_count",
           "error_count",
           "cursor",

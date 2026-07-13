@@ -1,3 +1,4 @@
+import hashlib
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -95,6 +96,14 @@ def iter_metadata(root: Path, exclusions: list[str], max_entries: int) -> Iterat
                     pending.append(Path(item.path))
 
 
+def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def scan_source(
     session: Any,
     source: Source,
@@ -121,10 +130,19 @@ def scan_source(
                 .one_or_none()
             )
             if existing:
+                content_changed = (
+                    existing.size != data["size"] or existing.mtime_ns != data["mtime_ns"]
+                )
+                if job.hash_contents and not data["is_dir"]:
+                    data["content_hash"] = hash_file(root / data["relative_path"])
+                elif content_changed:
+                    existing.content_hash = None
                 for key, value in data.items():
                     setattr(existing, key, value)
                 existing.scan_job_id = job.id
             else:
+                if job.hash_contents and not data["is_dir"]:
+                    data["content_hash"] = hash_file(root / data["relative_path"])
                 session.add(FileEntry(source_id=source.id, scan_job_id=job.id, **data))
             job.scanned_count += 1
             job.cursor = data["relative_path"]

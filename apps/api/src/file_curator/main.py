@@ -203,7 +203,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/scans", response_model=ScanRead, status_code=201)
     def create_scan(payload: ScanCreate, session: Session = Depends(session_dependency)):
         source = require(Source, payload.source_id, session)
-        job = ScanJob(source_id=source.id, mode=payload.mode, status="queued")
+        job = ScanJob(
+            source_id=source.id,
+            mode=payload.mode,
+            hash_contents=payload.hash_contents,
+            status="queued",
+        )
         session.add(job)
         session.commit()
         return job
@@ -714,6 +719,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "database": Path(database.engine.url.database or "memory").name,
             "config_writable": settings.config_dir.exists()
             and os.access(settings.config_dir, os.W_OK),
+            "webhook_configured": bool(settings.webhook_url),
             "counts": {
                 "sources": session.query(Source).count(),
                 "files": session.query(FileEntry).filter_by(active=True).count(),

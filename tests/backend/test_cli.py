@@ -40,3 +40,19 @@ def test_serve_rejects_multiple_sqlite_workers(monkeypatch, tmp_path: Path) -> N
         cli.main()
 
     assert error.value.code == 2
+
+
+def test_restore_backup_command_runs_offline(monkeypatch, tmp_path: Path, capsys) -> None:
+    settings = Settings(config_dir=tmp_path, serve_ui=False)
+    restored = tmp_path / "file-curator.db"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["file-curator", "restore-backup", "--backup", "file-curator-test.db"],
+    )
+    monkeypatch.setattr(cli, "Settings", lambda: settings)
+    monkeypatch.setattr(cli, "restore_backup", lambda value, name: restored)
+
+    cli.main()
+
+    assert capsys.readouterr().out.strip() == f"Restored database: {restored}"

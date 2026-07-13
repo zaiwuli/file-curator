@@ -64,6 +64,7 @@ class ScanJob(Base, TimestampMixin):
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(32), default="queued")
     mode: Mapped[str] = mapped_column(String(16), default="full")
+    hash_contents: Mapped[bool] = mapped_column(Boolean, default=False)
     scanned_count: Mapped[int] = mapped_column(Integer, default=0)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     cursor: Mapped[str | None] = mapped_column(Text)

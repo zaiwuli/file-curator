@@ -17,6 +17,7 @@ class ProcessorManifest:
     default_enabled: bool = True
     score_weight: float = 0.0
     safety_class: str = "normal"
+    option_schema: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -89,7 +90,12 @@ class DateExtractor(Processor):
 
 class IdentifierExtractor(Processor):
     manifest = ProcessorManifest(
-        "extract_identifier", "1.0.0", "extract", provides=("identifier",), score_weight=0.25
+        "extract_identifier",
+        "1.0.0",
+        "extract",
+        provides=("identifier",),
+        score_weight=0.25,
+        option_schema={"pattern": {"type": "string"}},
     )
     default_pattern = re.compile(r"(?i)(?<![A-Z0-9])([A-Z]{2,10}-\d{2,10})(?![A-Z0-9])")
 
@@ -162,7 +168,15 @@ class ParentContextExtractor(Processor):
 
 class CustomRegexExtractor(Processor):
     manifest = ProcessorManifest(
-        "extract_regex", "1.0.0", "extract", score_weight=0.1, safety_class="advanced"
+        "extract_regex",
+        "1.0.0",
+        "extract",
+        score_weight=0.1,
+        safety_class="advanced",
+        option_schema={
+            "pattern": {"type": "string"},
+            "field": {"type": "string", "default": "custom"},
+        },
     )
 
     def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
@@ -181,7 +195,16 @@ class CustomRegexExtractor(Processor):
 
 class NameNormalizer(Processor):
     manifest = ProcessorManifest(
-        "normalize_name", "1.0.0", "normalize", provides=("proposed_name",), score_weight=0.1
+        "normalize_name",
+        "1.0.0",
+        "normalize",
+        provides=("proposed_name",),
+        score_weight=0.1,
+        option_schema={
+            "remove_prefixes": {"type": "array", "items": {"type": "string"}},
+            "replacements": {"type": "array", "items": {"type": "object"}},
+            "invalid_replacement": {"type": "string", "default": "_"},
+        },
     )
 
     def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
@@ -214,6 +237,10 @@ class TemplateTarget(Processor):
         "target",
         provides=("proposed_name", "proposed_parent"),
         safety_class="review",
+        option_schema={
+            "name_template": {"type": "string"},
+            "parent_template": {"type": "string"},
+        },
     )
 
     def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
@@ -243,7 +270,12 @@ class TemplateTarget(Processor):
 
 class JunkDetector(Processor):
     manifest = ProcessorManifest(
-        "detect_junk", "1.0.0", "detect", provides=("junk_candidate",), score_weight=0.1
+        "detect_junk",
+        "1.0.0",
+        "detect",
+        provides=("junk_candidate",),
+        score_weight=0.1,
+        option_schema={"extensions": {"type": "array", "items": {"type": "string"}}},
     )
     defaults = {".tmp", ".part", ".download", ".crdownload"}
 
@@ -254,6 +286,85 @@ class JunkDetector(Processor):
         return ProcessorResult(
             confidence_delta=0.1, fields={"junk_candidate": True}, reasons=["junk.candidate"]
         )
+
+
+class LanguageExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_language",
+        "1.0.0",
+        "extract",
+        provides=("language",),
+        score_weight=0.1,
+        option_schema={"markers": {"type": "object"}},
+    )
+    default_markers = {
+        "zh-CN": ["chs", "zh-cn", "sc"],
+        "zh-TW": ["cht", "zh-tw", "tc"],
+        "en": ["eng", "english"],
+        "ja": ["jpn", "japanese"],
+    }
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        stem = Path(context.original_name).stem.casefold()
+        markers = options.get("markers", self.default_markers)
+        for language, values in markers.items():
+            if any(re.search(rf"(?<![a-z0-9]){re.escape(marker.casefold())}(?![a-z0-9])", stem) for marker in values):
+                return ProcessorResult(
+                    confidence_delta=0.1,
+                    fields={"language": language},
+                    reasons=["language.marker_matched"],
+                )
+        return ProcessorResult(status="skipped")
+
+
+class SourcePrefixExtractor(Processor):
+    manifest = ProcessorManifest(
+        "extract_source_prefix",
+        "1.0.0",
+        "extract",
+        provides=("source_prefix",),
+        score_weight=0.05,
+        option_schema={"prefixes": {"type": "array", "items": {"type": "string"}}},
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        for prefix in options.get("prefixes", []):
+            if context.original_name.casefold().startswith(str(prefix).casefold()):
+                return ProcessorResult(
+                    confidence_delta=0.05,
+                    fields={"source_prefix": prefix},
+                    reasons=["source_prefix.matched"],
+                )
+        return ProcessorResult(status="skipped")
+
+
+class ClassificationProcessor(Processor):
+    manifest = ProcessorManifest(
+        "classify_extension",
+        "1.0.0",
+        "classify",
+        provides=("category",),
+        score_weight=0.1,
+        option_schema={"categories": {"type": "object"}},
+    )
+    default_categories = {
+        "video": [".mkv", ".mp4", ".avi", ".mov", ".webm"],
+        "subtitle": [".srt", ".ass", ".ssa", ".vtt"],
+        "image": [".jpg", ".jpeg", ".png", ".webp", ".gif"],
+        "archive": [".zip", ".7z", ".rar", ".tar", ".gz"],
+        "document": [".pdf", ".txt", ".doc", ".docx"],
+    }
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        categories = options.get("categories", self.default_categories)
+        for category, extensions in categories.items():
+            if context.extension.casefold() in {str(value).casefold() for value in extensions}:
+                return ProcessorResult(
+                    confidence_delta=0.1,
+                    fields={"category": category},
+                    reasons=["classification.extension_matched"],
+                )
+        return ProcessorResult(status="skipped")
 
 
 class ProcessorRegistry:
@@ -298,6 +409,9 @@ def create_default_registry() -> ProcessorRegistry:
         NameNormalizer(),
         TemplateTarget(),
         JunkDetector(),
+        LanguageExtractor(),
+        SourcePrefixExtractor(),
+        ClassificationProcessor(),
     ):
         registry.register(processor)
     return registry

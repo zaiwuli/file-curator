@@ -38,6 +38,7 @@ class SourceRead(ORMModel):
 class ScanCreate(BaseModel):
     source_id: str
     mode: Literal["full", "incremental"] = "full"
+    hash_contents: bool = False
 
 
 class ScanRead(ORMModel):
@@ -45,6 +46,7 @@ class ScanRead(ORMModel):
     source_id: str
     status: str
     mode: str
+    hash_contents: bool
     scanned_count: int
     error_count: int
     cursor: str | None
@@ -293,6 +295,7 @@ class DiagnosticsRead(BaseModel):
     worker_alive: bool
     database: str
     config_writable: bool
+    webhook_configured: bool
     counts: dict[str, int]
 
 

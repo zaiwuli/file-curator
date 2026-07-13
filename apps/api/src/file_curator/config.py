@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     admin_token: str | None = None
     worker_enabled: bool = True
     worker_poll_seconds: float = 0.25
+    webhook_url: str | None = None
+    webhook_timeout: float = 5.0
 
     @property
     def resolved_database_url(self) -> str:

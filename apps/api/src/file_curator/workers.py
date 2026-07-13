@@ -1,4 +1,6 @@
+import json
 import threading
+import urllib.request
 from datetime import UTC, datetime, timedelta
 
 from .config import Settings
@@ -42,6 +44,22 @@ class WorkerService:
             for batch in session.query(ExecutionBatch).filter_by(status="running").all():
                 batch.status = "queued"
             session.commit()
+
+    def _notify(self, event: str, payload: dict[str, object]) -> None:
+        if not self.settings.webhook_url:
+            return
+        body = json.dumps({"event": event, **payload}).encode("utf-8")
+        request = urllib.request.Request(
+            self.settings.webhook_url,
+            data=body,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.settings.webhook_timeout):
+                pass
+        except (OSError, ValueError):
+            pass
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -113,6 +131,16 @@ class WorkerService:
                 job.error_count += 1
                 job.errors = [*job.errors, {"path": job.cursor or "", "error": type(exc).__name__}]
                 session.commit()
+            self._notify(
+                "scan.finished",
+                {
+                    "scan_id": job.id,
+                    "source_id": job.source_id,
+                    "status": job.status,
+                    "scanned_count": job.scanned_count,
+                    "error_count": job.error_count,
+                },
+            )
             return True
 
     def _run_batch(self) -> bool:
@@ -131,4 +159,15 @@ class WorkerService:
                 batch.status = "failed"
                 batch.error = exc.code if isinstance(exc, DomainError) else type(exc).__name__
                 session.commit()
+            if batch.status in {"completed", "failed", "paused", "cancelled"}:
+                self._notify(
+                    "batch.finished",
+                    {
+                        "batch_id": batch.id,
+                        "plan_id": batch.plan_id,
+                        "status": batch.status,
+                        "succeeded": batch.succeeded,
+                        "failed": batch.failed,
+                    },
+                )
             return True
