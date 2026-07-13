@@ -65,6 +65,7 @@ def test_run_migrations_uses_runtime_database(monkeypatch, tmp_path: Path) -> No
     config_path = tmp_path / "alembic.ini"
     config_path.write_text("[alembic]\nscript_location = migrations\n", encoding="utf-8")
     settings = Settings(
+        config_dir=tmp_path / "config",
         alembic_config=config_path,
         database_url="sqlite:///runtime.db",
         serve_ui=False,
@@ -84,6 +85,7 @@ def test_run_migrations_uses_runtime_database(monkeypatch, tmp_path: Path) -> No
 
     cli.run_migrations(settings)
 
+    assert settings.config_dir.exists()
     assert captured == {
         "path": str(config_path),
         "sqlalchemy.url": "sqlite:///runtime.db",

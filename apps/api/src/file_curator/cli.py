@@ -31,6 +31,7 @@ def detect_unstamped_revision(database_url: str) -> str | None:
 def run_migrations(settings: Settings) -> None:
     if settings.alembic_config is None or not settings.alembic_config.is_file():
         return
+    settings.config_dir.mkdir(parents=True, exist_ok=True)
     config = Config(str(settings.alembic_config))
     config.set_main_option("sqlalchemy.url", settings.resolved_database_url)
     unstamped = detect_unstamped_revision(settings.resolved_database_url)
