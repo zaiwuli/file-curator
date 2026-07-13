@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 
 from file_curator.config import Settings
-from file_curator.db import Database
+from file_curator.db import Database, ScanJob, Source
 from file_curator.services import restore_backup
 from file_curator.workers import WorkerService
 
@@ -57,3 +57,22 @@ def test_webhook_notification_contains_only_job_summary(monkeypatch, tmp_path: P
         "body": {"event": "scan.finished", "scan_id": "scan-1", "status": "completed"},
         "timeout": 2.0,
     }
+
+
+def test_worker_recovers_interrupted_scan_to_queue(tmp_path: Path) -> None:
+    database = Database(f"sqlite:///{(tmp_path / 'recovery.db').as_posix()}")
+    database.create_all()
+    with database.session_factory() as session:
+        source = Source(name="Recovery", root_path=str(tmp_path))
+        session.add(source)
+        session.flush()
+        job = ScanJob(source_id=source.id, mode="full", status="running")
+        session.add(job)
+        session.commit()
+        job_id = job.id
+    worker = WorkerService(database, Settings(database_url=str(database.engine.url)))
+
+    worker._recover_interrupted()
+
+    with database.session_factory() as session:
+        assert session.get(ScanJob, job_id).status == "queued"
