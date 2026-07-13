@@ -56,3 +56,4 @@ to strip that same prefix before forwarding requests to the container.
 - Start with read-only source mounts while validating workflows.
 - Use low scan/execution concurrency for slow or remotely backed directories.
 - Snapshot `/config` only after an application backup has completed.
+- Configure `FILE_CURATOR_WEBHOOK_URL` only for a trusted HTTPS endpoint; payloads contain job summaries but no file paths.

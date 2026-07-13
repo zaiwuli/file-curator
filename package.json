@@ -1,6 +1,6 @@
 {
   "name": "file-curator",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "engines": {
     "node": ">=22"
@@ -12,4 +12,3 @@
     "typecheck:web": "npm --prefix apps/web run typecheck"
   }
 }
-

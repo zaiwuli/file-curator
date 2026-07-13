@@ -79,8 +79,12 @@ Mount `/config` read-write for SQLite and backups. Mount allowed local directori
 
 See [deployment](docs/deployment.md), [Synology](docs/synology.md), and [architecture](docs/architecture.md) for permissions, reverse proxy, backup, and upgrade guidance.
 
-## Current implementation boundary
+## Version 1.0 capabilities
 
-The v1 foundation includes local sources, metadata scans, processor revisions and traces, virtual plans, freeze/confirm, bounded execution, pause/cancel/retry, audit history, online SQLite backup, schedules, quarantine, and whole-batch rollback. The desktop UI is wired to the primary source, workflow, pipeline, review, plan, execution, backup, and rollback APIs.
+Version 1.0 includes local sources, metadata and opt-in hash scans, file browsing, file groups, deterministic processor revisions and traces, per-file review decisions, virtual plans, freeze/confirm, preflight, bounded execution, post-operation verification, pause/cancel/retry, audit history, online SQLite backup, scheduled scans, webhook summaries, quarantine, rollback simulation, and whole-batch rollback.
 
-Content hashing remains opt-in. Review items expose evidence but do not yet have per-item approval overrides; create a new workflow revision to change a decision. Docker image execution is validated in CI because a Docker engine is not required for local frontend/backend development.
+The desktop UI supports English and Simplified Chinese and is wired to source, browser, workflow, review, plan, execution, recovery, scheduling, backup, and diagnostics APIs. Content hashing remains explicitly opt-in. Restore a backup while the service is stopped with `python -m file_curator restore-backup --backup FILE.db`.
+
+Set `FILE_CURATOR_WEBHOOK_URL` to receive scan and execution completion summaries. The payload contains job identifiers, status, and counters; it does not include file paths. Docker image execution is validated in CI because a Docker engine is not required for local frontend/backend development.
+
+Run the desktop end-to-end suite with `npm run test:e2e` after installing Chromium using `npx playwright install chromium`.

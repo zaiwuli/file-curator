@@ -82,4 +82,6 @@ test('desktop shell has named controls and no horizontal overflow', async ({ pag
   const overflows = await page.locator('body').evaluate(body => body.scrollWidth > body.clientWidth)
   expect(unnamedButtons).toBe(0)
   expect(overflows).toBe(false)
+  await page.getByRole('button', { name: 'Switch to Chinese' }).click()
+  await expect(page.getByRole('heading', { name: '工作区概览' })).toBeVisible()
 })

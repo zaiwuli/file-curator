@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FILE_CURATOR_", extra="ignore")
 
     app_name: str = "File Curator"
-    version: str = "0.1.0"
+    version: str = "1.0.0"
     host: str = "127.0.0.1"
     port: int = 8000
     workers: int = 1
@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 0.25
     webhook_url: str | None = None
     webhook_timeout: float = 5.0
+    alembic_config: Path | None = Path("./alembic.ini")
 
     @property
     def resolved_database_url(self) -> str:

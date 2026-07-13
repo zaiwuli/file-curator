@@ -38,6 +38,7 @@ socket or host devices.
 | `FILE_CURATOR_PORT` | `8080` | Host HTTP port |
 | `FILE_CURATOR_BASE_PATH` | `/` | Reverse-proxy URL prefix |
 | `FILE_CURATOR_LOG_LEVEL` | `INFO` | Application log level |
+| `FILE_CURATOR_WEBHOOK_URL` | empty | Optional scan and execution summary webhook |
 | `FILE_CURATOR_CONFIG_PATH` | `./data/config` | Host persistent data path |
 | `FILE_CURATOR_SOURCES_PATH` | `./data/sources` | Host source root |
 | `PUID` / `PGID` | `1000` | Runtime numeric user/group |
@@ -45,6 +46,14 @@ socket or host devices.
 
 Do not increase `FILE_CURATOR_WORKERS`: SQLite writes and durable execution jobs
 are intentionally coordinated by one application process.
+
+Restore an online backup only while the service is stopped:
+
+```sh
+docker compose stop file-curator
+docker compose run --rm file-curator python -m file_curator restore-backup --backup FILE.db
+docker compose up -d
+```
 
 ## Reverse proxy
 

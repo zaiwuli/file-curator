@@ -44,7 +44,7 @@ ENV PYTHONUNBUFFERED=1 \
     FILE_CURATOR_UI_DIR=/app/static \
     FILE_CURATOR_BASE_PATH=/ \
     FILE_CURATOR_VERSION=${FILE_CURATOR_VERSION} \
-    ALEMBIC_CONFIG=/app/alembic.ini \
+    FILE_CURATOR_ALEMBIC_CONFIG=/app/alembic.ini \
     HOME=/tmp
 
 RUN groupadd --gid "${APP_GID}" filecurator \
