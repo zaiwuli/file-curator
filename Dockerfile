@@ -14,7 +14,7 @@ ENV VITE_BASE_PATH=${VITE_BASE_PATH} \
 RUN npm run typecheck && npm run test && npm run build
 
 
-FROM python:3.12-slim AS api-build
+FROM python:3.14-slim AS api-build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 WORKDIR /build
@@ -25,7 +25,7 @@ COPY apps/api/ ./apps/api/
 RUN python -m build --wheel --outdir /build/wheels ./apps/api
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 ARG FILE_CURATOR_VERSION=dev
 ARG APP_UID=1000
 ARG APP_GID=1000
