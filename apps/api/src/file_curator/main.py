@@ -17,6 +17,7 @@ from .db import (
     FileEntry,
     PipelineRun,
     Plan,
+    ReviewDecision,
     ScanJob,
     Schedule,
     Source,
@@ -36,6 +37,9 @@ from .schemas import (
     PipelineRunRead,
     PlanCreate,
     PlanRead,
+    ReviewDecisionRead,
+    ReviewDecisionUpsert,
+    ReviewItemRead,
     ScanCreate,
     ScanRead,
     ScheduleCreate,
@@ -309,7 +313,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             query = query.filter_by(file_entry_id=file_entry_id)
         return query.order_by(StageResult.created_at).all()
 
-    @app.get("/api/reviews", response_model=list[StageResultRead])
+    @app.get("/api/reviews", response_model=list[ReviewItemRead])
     def reviews(
         run_id: str | None = None,
         limit: int = Query(200, ge=1, le=1000),
@@ -318,7 +322,92 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         query = session.query(StageResult).filter(StageResult.status.in_(["review", "warning"]))
         if run_id:
             query = query.filter_by(run_id=run_id)
-        return query.order_by(StageResult.created_at.desc()).limit(limit).all()
+        flagged = query.order_by(StageResult.created_at.desc()).all()
+        keys: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for result in flagged:
+            key = (result.run_id, result.file_entry_id)
+            if key not in seen:
+                keys.append(key)
+                seen.add(key)
+            if len(keys) >= limit:
+                break
+        items: list[dict[str, Any]] = []
+        for item_run_id, file_entry_id in keys:
+            entry = session.get(FileEntry, file_entry_id)
+            if not entry:
+                continue
+            results = (
+                session.query(StageResult)
+                .filter_by(run_id=item_run_id, file_entry_id=file_entry_id)
+                .order_by(StageResult.created_at)
+                .all()
+            )
+            latest = results[-1]
+            proposed_name = latest.output_data.get("proposed_name") or entry.name
+            proposed_parent = latest.output_data.get("proposed_parent")
+            if proposed_parent is None:
+                proposed_parent = entry.parent_path
+            proposed_path = (
+                (Path(proposed_parent) / proposed_name).as_posix()
+                if proposed_parent
+                else proposed_name
+            )
+            decision = (
+                session.query(ReviewDecision)
+                .filter_by(run_id=item_run_id, file_entry_id=file_entry_id)
+                .one_or_none()
+            )
+            items.append(
+                {
+                    "run_id": item_run_id,
+                    "file_entry_id": file_entry_id,
+                    "relative_path": entry.relative_path,
+                    "proposed_relative_path": proposed_path,
+                    "confidence": latest.confidence,
+                    "reasons": [reason for result in results for reason in result.reasons],
+                    "warnings": [warning for result in results for warning in result.warnings],
+                    "processors": [result.processor_id for result in results],
+                    "decision": decision,
+                }
+            )
+        return items
+
+    @app.put(
+        "/api/reviews/{run_id}/{file_entry_id}",
+        response_model=ReviewDecisionRead,
+    )
+    def decide_review(
+        run_id: str,
+        file_entry_id: str,
+        payload: ReviewDecisionUpsert,
+        session: Session = Depends(session_dependency),
+    ):
+        run = require(PipelineRun, run_id, session)
+        entry = require(FileEntry, file_entry_id, session)
+        if entry.source_id != run.source_id:
+            raise HTTPException(400, detail="review.file_outside_run_source")
+        flagged = (
+            session.query(StageResult)
+            .filter_by(run_id=run_id, file_entry_id=file_entry_id)
+            .filter(StageResult.status.in_(["review", "warning"]))
+            .first()
+        )
+        if not flagged:
+            raise HTTPException(409, detail="review.not_required")
+        decision = (
+            session.query(ReviewDecision)
+            .filter_by(run_id=run_id, file_entry_id=file_entry_id)
+            .one_or_none()
+        )
+        if decision is None:
+            decision = ReviewDecision(run_id=run_id, file_entry_id=file_entry_id, action="keep")
+            session.add(decision)
+        decision.action = payload.action
+        decision.target_relative_path = payload.target_relative_path
+        decision.note = payload.note
+        session.commit()
+        return decision
 
     @app.post("/api/plans", response_model=PlanRead, status_code=201)
     def create_plan(payload: PlanCreate, session: Session = Depends(session_dependency)):

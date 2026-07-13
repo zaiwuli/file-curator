@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ORMModel(BaseModel):
@@ -115,6 +115,51 @@ class StageResultRead(ORMModel):
     output_data: dict[str, Any]
     reasons: list[str]
     warnings: list[str]
+
+
+class ReviewDecisionUpsert(BaseModel):
+    action: Literal["accept", "keep", "override"]
+    target_relative_path: str | None = None
+    note: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("target_relative_path")
+    @classmethod
+    def relative_target_only(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not value or value.startswith(("/", "\\")) or ":" in value
+        ):
+            raise ValueError("path.must_be_relative")
+        return value
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if self.action == "override" and not self.target_relative_path:
+            raise ValueError("review.override_target_required")
+        if self.action != "override" and self.target_relative_path is not None:
+            raise ValueError("review.target_only_for_override")
+        return self
+
+
+class ReviewDecisionRead(ORMModel):
+    id: str
+    run_id: str
+    file_entry_id: str
+    action: str
+    target_relative_path: str | None
+    note: str | None
+    updated_at: datetime
+
+
+class ReviewItemRead(BaseModel):
+    run_id: str
+    file_entry_id: str
+    relative_path: str
+    proposed_relative_path: str
+    confidence: float
+    reasons: list[str]
+    warnings: list[str]
+    processors: list[str]
+    decision: ReviewDecisionRead | None = None
 
 
 class PlanCreate(BaseModel):

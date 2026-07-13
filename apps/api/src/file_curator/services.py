@@ -15,6 +15,7 @@ from .db import (
     Operation,
     PipelineRun,
     Plan,
+    ReviewDecision,
     Source,
     StageResult,
     Workflow,
@@ -163,26 +164,54 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
     if run.status not in {"completed", "review"}:
         raise DomainError("plan.pipeline_not_ready")
     latest: dict[str, StageResult] = {}
-    for result in (
+    review_required: set[str] = set()
+    results = (
         session.query(StageResult).filter_by(run_id=run.id).order_by(StageResult.created_at).all()
-    ):
+    )
+    for result in results:
         latest[result.file_entry_id] = result
+        if result.status in {"review", "warning"}:
+            review_required.add(result.file_entry_id)
+    decisions = {
+        decision.file_entry_id: decision
+        for decision in session.query(ReviewDecision).filter_by(run_id=run.id).all()
+    }
     plan = Plan(run_id=run.id, source_id=run.source_id, status="draft")
     session.add(plan)
     session.flush()
     sequence = 0
+    unresolved = kept = overridden = 0
     for file_id, result in latest.items():
         entry = session.get(FileEntry, file_id)
         if not entry:
             continue
-        name = result.output_data.get("proposed_name") or entry.name
-        parent = result.output_data.get("proposed_parent")
-        if parent is None:
-            parent = entry.parent_path
-        target = (Path(parent) / name).as_posix() if parent else name
+        decision = decisions.get(file_id)
+        if file_id in review_required and decision is None:
+            unresolved += 1
+            continue
+        if decision and decision.action == "keep":
+            kept += 1
+            continue
+        if decision and decision.action == "override":
+            target = decision.target_relative_path
+            if not target:
+                raise DomainError("review.override_target_required")
+            overridden += 1
+        else:
+            name = result.output_data.get("proposed_name") or entry.name
+            parent = result.output_data.get("proposed_parent")
+            if parent is None:
+                parent = entry.parent_path
+            target = (Path(parent) / name).as_posix() if parent else name
         if target == entry.relative_path:
             continue
-        kind = "rename" if parent == entry.parent_path else "move"
+        target_parent = Path(target).parent.as_posix()
+        if target_parent == ".":
+            target_parent = ""
+        kind = "rename" if target_parent == entry.parent_path else "move"
+        reasons = list(result.reasons)
+        if decision:
+            reasons.append(f"review.{decision.action}")
         plan.operations.append(
             Operation(
                 sequence=sequence,
@@ -191,11 +220,16 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
                 target_relative_path=target,
                 expected_size=entry.size,
                 expected_mtime_ns=entry.mtime_ns,
-                reasons=result.reasons,
+                reasons=reasons,
             )
         )
         sequence += 1
-    plan.summary = {"operation_count": len(plan.operations)}
+    plan.summary = {
+        "operation_count": len(plan.operations),
+        "unresolved_review_count": unresolved,
+        "kept_count": kept,
+        "overridden_count": overridden,
+    }
     session.commit()
     return plan
 

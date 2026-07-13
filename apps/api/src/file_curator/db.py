@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     event,
 )
@@ -144,6 +145,21 @@ class StageResult(Base, TimestampMixin):
     output_data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+
+class ReviewDecision(Base, TimestampMixin):
+    __tablename__ = "review_decisions"
+    __table_args__ = (UniqueConstraint("run_id", "file_entry_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("pipeline_runs.id", ondelete="CASCADE"), index=True
+    )
+    file_entry_id: Mapped[str] = mapped_column(
+        ForeignKey("file_entries.id", ondelete="CASCADE"), index=True
+    )
+    action: Mapped[str] = mapped_column(String(32))
+    target_relative_path: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
 
 
 class Plan(Base, TimestampMixin):

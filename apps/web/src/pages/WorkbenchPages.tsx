@@ -1,7 +1,7 @@
 import { CheckCircle2, CirclePause, RotateCcw, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import type { AuditLog, Batch, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, StageResult, Workflow } from '../types'
+import type { AuditLog, Batch, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewItem, Workflow } from '../types'
 
 type ActionProps = { notify: (message: string) => void; refresh: () => Promise<void> }
 
@@ -37,12 +37,22 @@ export function PipelinePage({ sources, workflows, processors, runs, notify, ref
       <aside className="panel processor-panel"><div className="section-kicker">WORKFLOW</div><h2>{selected ? selected.name : 'Create workflow'}</h2><label className="form-label">Name</label><input className="text-input" value={name} onChange={e=>setName(e.target.value)}/><label className="form-label">Preset</label><select className="text-input" value={preset} onChange={e=>setPreset(e.target.value)}><option value="rename_only">Rename Only</option><option value="rename_and_organize">Rename And Organize</option></select><label className="form-label">Review policy</label><select className="text-input" value={policy} onChange={e=>setPolicy(e.target.value)}><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="automatic">Automatic</option></select><label className="form-label">Source</label><select className="text-input" value={sourceId} onChange={e=>setSourceId(e.target.value)}>{sources.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><label className="form-label">Existing workflow</label><select className="text-input" value={workflowId} onChange={e=>setWorkflowId(e.target.value)}><option value="">New workflow</option>{workflows.map(item=><option key={item.id} value={item.id}>{item.name} · rev {item.current_revision}</option>)}</select><button className="button secondary" onClick={()=>void create()}>Create as new</button><div className="callout"><ShieldCheck size={15}/><div><strong>Latest run</strong><small>{runs[0] ? `${runs[0].status} · revision ${runs[0].workflow_revision}` : 'No pipeline run yet'}</small></div></div></aside></div></>
 }
 
-export function ReviewPage({ reviews, runs }: { reviews: StageResult[]; runs: PipelineRun[] }) {
+export function ReviewPage({ reviews, runs, notify, refresh }: ActionProps & { reviews: ReviewItem[]; runs: PipelineRun[] }) {
   const [runId, setRunId] = useState('')
-  const [trace, setTrace] = useState<StageResult[]>([])
-  const loadTrace = async (id: string) => { setRunId(id); setTrace(id ? await api.trace(id) : []) }
-  const rows = trace.length ? trace : reviews
-  return <><Header heading="Review center" description="Inspect deterministic evidence. Warning and review results are never hidden." actions={<select className="select" value={runId} onChange={e=>void loadTrace(e.target.value)}><option value="">Review gates only</option>{runs.map(run=><option key={run.id} value={run.id}>Run {run.id.slice(0,8)} · rev {run.workflow_revision}</option>)}</select>}/><section className="panel review-list">{rows.length===0?<Empty>No review items. Run a pipeline or select a trace.</Empty>:rows.map(row=><div className="review-item" key={row.id}><div className="review-symbol"><CheckCircle2 size={16}/></div><div className="review-main"><div><strong>{row.processor_id.replaceAll('_',' ')}</strong><Badge value={row.status}/></div><span>{row.reasons.join(', ') || row.warnings.join(', ') || 'No additional evidence'}</span><code>Score {Math.round(row.confidence*100)}% · file {row.file_entry_id.slice(0,8)}</code><details><summary>Input and output</summary><pre>{JSON.stringify({ input: row.input_data, output: row.output_data }, null, 2)}</pre></details></div></div>)}</section></>
+  const [filtered, setFiltered] = useState<ReviewItem[] | null>(null)
+  const [overrides, setOverrides] = useState<Record<string,string>>({})
+  const rows = filtered ?? reviews
+  const loadRun = async (id: string) => { setRunId(id); setFiltered(id ? await api.reviews(id) : null) }
+  const decide = (row: ReviewItem, action: 'accept'|'keep'|'override') => perform(
+    () => api.decideReview(row.run_id, row.file_entry_id, {
+      action,
+      ...(action === 'override' ? { target_relative_path: overrides[row.file_entry_id] || row.proposed_relative_path } : {}),
+    }),
+    async () => { await refresh(); setFiltered(runId ? await api.reviews(runId) : null) },
+    notify,
+    action === 'keep' ? 'File will remain unchanged' : 'Review decision saved',
+  )
+  return <><Header heading="Review center" description="Approve, keep, or override every gated file before it can enter an executable plan." actions={<select className="select" value={runId} onChange={e=>void loadRun(e.target.value)}><option value="">All review gates</option>{runs.map(run=><option key={run.id} value={run.id}>Run {run.id.slice(0,8)} · rev {run.workflow_revision}</option>)}</select>}/><section className="panel review-list">{rows.length===0?<Empty>No unresolved review items.</Empty>:rows.map(row=><div className="review-item" key={`${row.run_id}:${row.file_entry_id}`}><div className="review-symbol"><CheckCircle2 size={16}/></div><div className="review-main"><div><strong>{row.relative_path}</strong><Badge value={row.decision?.action || 'unresolved'}/></div><span>{row.warnings.join(', ') || row.reasons.join(', ') || 'Manual review required'}</span><code>{row.relative_path} → {row.proposed_relative_path} · score {Math.round(row.confidence*100)}%</code><details><summary>Evidence and processors</summary><pre>{JSON.stringify({ processors: row.processors, reasons: row.reasons, warnings: row.warnings }, null, 2)}</pre></details><label className="form-label">Manual target path</label><input className="text-input" value={overrides[row.file_entry_id] ?? row.decision?.target_relative_path ?? row.proposed_relative_path} onChange={event=>setOverrides({...overrides,[row.file_entry_id]:event.target.value})}/></div><div className="review-actions"><button className="button quiet" onClick={()=>void decide(row,'keep')}>Keep unchanged</button><button className="button secondary" onClick={()=>void decide(row,'override')}>Use manual path</button><button className="button primary" onClick={()=>void decide(row,'accept')}>Accept suggestion</button></div></div>)}</section></>
 }
 
 export function PreviewPage({ runs, plans, notify, refresh }: ActionProps & { runs: PipelineRun[]; plans: PlanSummary[] }) {

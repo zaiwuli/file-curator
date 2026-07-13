@@ -541,6 +541,172 @@
         "title": "ProcessorConfig",
         "type": "object"
       },
+      "ReviewDecisionRead": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "file_entry_id": {
+            "title": "File Entry Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "target_relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Relative Path"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "file_entry_id",
+          "action",
+          "target_relative_path",
+          "note",
+          "updated_at"
+        ],
+        "title": "ReviewDecisionRead",
+        "type": "object"
+      },
+      "ReviewDecisionUpsert": {
+        "properties": {
+          "action": {
+            "enum": [
+              "accept",
+              "keep",
+              "override"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "target_relative_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Relative Path"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ReviewDecisionUpsert",
+        "type": "object"
+      },
+      "ReviewItemRead": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewDecisionRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "file_entry_id": {
+            "title": "File Entry Id",
+            "type": "string"
+          },
+          "processors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Processors",
+            "type": "array"
+          },
+          "proposed_relative_path": {
+            "title": "Proposed Relative Path",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "relative_path": {
+            "title": "Relative Path",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "file_entry_id",
+          "relative_path",
+          "proposed_relative_path",
+          "confidence",
+          "reasons",
+          "warnings",
+          "processors"
+        ],
+        "title": "ReviewItemRead",
+        "type": "object"
+      },
       "ScanCreate": {
         "properties": {
           "mode": {
@@ -1937,7 +2103,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/StageResultRead"
+                    "$ref": "#/components/schemas/ReviewItemRead"
                   },
                   "title": "Response Reviews Api Reviews Get",
                   "type": "array"
@@ -1958,6 +2124,64 @@
           }
         },
         "summary": "Reviews"
+      }
+    },
+    "/api/reviews/{run_id}/{file_entry_id}": {
+      "put": {
+        "operationId": "decide_review_api_reviews__run_id___file_entry_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_entry_id",
+            "required": true,
+            "schema": {
+              "title": "File Entry Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDecisionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Review"
       }
     },
     "/api/scans": {

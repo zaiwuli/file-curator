@@ -123,3 +123,66 @@ def test_schedule_and_duplicate_candidates(client, media_root: Path) -> None:
     updated = client.patch(f"/api/schedules/{schedule_id}", json={"enabled": False})
     assert updated.json()["enabled"] is False
     assert client.delete(f"/api/schedules/{schedule_id}").status_code == 204
+
+
+def test_review_decisions_gate_and_override_plan_operations(client, media_root: Path) -> None:
+    (media_root / "prefix-Example.MP4").write_bytes(b"content")
+    source_id, _ = create_source_and_scan(client, media_root)
+    workflow = client.post(
+        "/api/workflows",
+        json={
+            "name": "Review required",
+            "processors": [
+                {
+                    "id": "normalize_name",
+                    "options": {"remove_prefixes": ["prefix-"]},
+                },
+                {
+                    "id": "target_template",
+                    "options": {"parent_template": "{missing_field}"},
+                },
+            ],
+        },
+    ).json()
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source_id, "workflow_id": workflow["id"]},
+    ).json()
+    reviews = client.get("/api/reviews", params={"run_id": run["id"]}).json()
+    assert len(reviews) == 1
+    item = reviews[0]
+    assert item["relative_path"] == "prefix-Example.MP4"
+    assert item["proposed_relative_path"] == "Example.mp4"
+    assert item["decision"] is None
+
+    unresolved_plan = client.post("/api/plans", json={"run_id": run["id"]}).json()
+    assert unresolved_plan["operations"] == []
+    assert unresolved_plan["summary"]["unresolved_review_count"] == 1
+
+    accepted = client.put(
+        f"/api/reviews/{run['id']}/{item['file_entry_id']}",
+        json={"action": "accept"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_plan = client.post("/api/plans", json={"run_id": run["id"]}).json()
+    assert accepted_plan["operations"][0]["target_relative_path"] == "Example.mp4"
+
+    overridden = client.put(
+        f"/api/reviews/{run['id']}/{item['file_entry_id']}",
+        json={"action": "override", "target_relative_path": "Reviewed/Example.mp4"},
+    )
+    assert overridden.status_code == 200, overridden.text
+    override_plan = client.post("/api/plans", json={"run_id": run["id"]}).json()
+    operation = override_plan["operations"][0]
+    assert operation["kind"] == "move"
+    assert operation["target_relative_path"] == "Reviewed/Example.mp4"
+    assert "review.override" in operation["reasons"]
+
+    kept = client.put(
+        f"/api/reviews/{run['id']}/{item['file_entry_id']}",
+        json={"action": "keep"},
+    )
+    assert kept.status_code == 200, kept.text
+    kept_plan = client.post("/api/plans", json={"run_id": run["id"]}).json()
+    assert kept_plan["operations"] == []
+    assert kept_plan["summary"]["kept_count"] == 1

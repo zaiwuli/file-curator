@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ApiSource, AuditLog, Batch, PipelineRun, PlanSummary, ProcessorManifest, Source, StageResult, Workflow } from '../types'
+import type { ApiSource, AuditLog, Batch, PipelineRun, PlanSummary, ProcessorManifest, ReviewItem, Source, Workflow } from '../types'
 
 export function useWorkspace() {
   const [sources, setSources] = useState<Source[]>([])
@@ -8,7 +8,7 @@ export function useWorkspace() {
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [processors, setProcessors] = useState<ProcessorManifest[]>([])
   const [runs, setRuns] = useState<PipelineRun[]>([])
-  const [reviews, setReviews] = useState<StageResult[]>([])
+  const [reviews, setReviews] = useState<ReviewItem[]>([])
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [history, setHistory] = useState<AuditLog[]>([])

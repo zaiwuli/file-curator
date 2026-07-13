@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Batch, Health, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, StageResult, Workflow } from './types'
+import type { ApiSource, AuditLog, Batch, Health, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, StageResult, Workflow } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -27,7 +27,7 @@ export const api = {
   workflows: () => request<Workflow[]>('/workflows'),
   processors: () => request<ProcessorManifest[]>('/processors'),
   pipelineRuns: () => request<PipelineRun[]>('/pipeline-runs'),
-  reviews: () => request<StageResult[]>('/reviews'),
+  reviews: (runId?: string) => request<ReviewItem[]>(`/reviews${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`),
   plans: () => request<PlanSummary[]>('/plans'),
   batches: () => request<Batch[]>('/batches'),
   history: () => request<AuditLog[]>('/history'),
@@ -37,6 +37,7 @@ export const api = {
   reviseWorkflow: (id: string, processors: ProcessorConfig[], review_policy: string) => post<Workflow>(`/workflows/${id}/revisions`, { processors, review_policy }),
   runPipeline: (source_id: string, workflow_id: string) => post<PipelineRun>('/pipeline-runs', { source_id, workflow_id }),
   trace: (runId: string) => request<StageResult[]>(`/pipeline-runs/${runId}/trace`),
+  decideReview: (runId: string, fileEntryId: string, payload: { action: 'accept'|'keep'|'override'; target_relative_path?: string; note?: string }) => request<ReviewDecision>(`/reviews/${runId}/${fileEntryId}`, { method: 'PUT', body: JSON.stringify(payload) }),
   createPlan: (run_id: string) => post<PlanSummary>('/plans', { run_id }),
   freezePlan: (id: string) => post<PlanSummary>(`/plans/${id}/freeze`),
   confirmPlan: (id: string) => post<PlanSummary>(`/plans/${id}/confirm`),
