@@ -1,5 +1,5 @@
 import re
-import shutil
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -268,9 +268,9 @@ def create_manual_plan(session: Session, payload: ManualPlanCreate) -> Plan:
     return plan
 
 
-def freeze_plan(session: Session, plan: Plan) -> Plan:
-    if plan.status != "draft":
-        raise DomainError("plan.not_draft")
+def preflight_plan(session: Session, plan: Plan) -> dict[str, int | str]:
+    if plan.status not in {"draft", "frozen", "confirmed", "queued"}:
+        raise DomainError("plan.not_preflightable")
     source = session.get(Source, plan.source_id)
     if not source:
         raise DomainError("source.not_found", 404)
@@ -298,6 +298,13 @@ def freeze_plan(session: Session, plan: Plan) -> Plan:
             != Path(operation.target_relative_path).suffix.lower()
         ):
             raise DomainError("operation.extension_changed")
+    return {"status": "ready", "operation_count": len(plan.operations)}
+
+
+def freeze_plan(session: Session, plan: Plan) -> Plan:
+    if plan.status != "draft":
+        raise DomainError("plan.not_draft")
+    preflight_plan(session, plan)
     plan.status = "frozen"
     plan.frozen_at = utcnow()
     session.commit()
@@ -340,9 +347,8 @@ def execute_batch(session: Session, batch: ExecutionBatch, settings: Settings) -
         .filter_by(batch_id=batch.id, event="operation.executed", status="success")
         .all()
     }
-    for operation in plan.operations[: settings.execution_batch_size]:
-        if operation.id in successful_ids:
-            continue
+    pending = [operation for operation in plan.operations if operation.id not in successful_ids]
+    for operation in pending[: settings.execution_batch_size]:
         session.refresh(batch)
         if batch.status in {"pause_requested", "cancel_requested"}:
             batch.status = "paused" if batch.status == "pause_requested" else "cancelled"
@@ -367,7 +373,12 @@ def execute_batch(session: Session, batch: ExecutionBatch, settings: Settings) -
                 raise FileSafetyError("operation.source_changed")
             target_path.parent.mkdir(parents=True, exist_ok=True)
             source_path.rename(target_path)
+            if not target_path.exists():
+                raise FileSafetyError("operation.verification_failed")
+            if not target_path.is_dir() and target_path.stat().st_size != operation.expected_size:
+                raise FileSafetyError("operation.verification_failed")
             batch.succeeded += 1
+            successful_ids.add(operation.id)
             session.add(
                 AuditLog(
                     batch_id=batch.id,
@@ -393,12 +404,17 @@ def execute_batch(session: Session, batch: ExecutionBatch, settings: Settings) -
             session.commit()
             break
         session.commit()
-    if batch.failed == 0 and batch.status == "running":
+    if batch.failed:
+        plan.status = "failed"
+        batch.completed_at = utcnow()
+    elif batch.status == "running" and len(successful_ids) < len(plan.operations):
+        batch.status = "queued"
+        plan.status = "executing"
+        batch.completed_at = None
+    elif batch.status == "running":
         batch.status = "completed"
         plan.status = "completed"
-    else:
-        plan.status = "failed"
-    batch.completed_at = utcnow()
+        batch.completed_at = utcnow()
     session.commit()
     return batch
 
@@ -456,5 +472,7 @@ def create_backup(session: Session, settings: Settings) -> Path:
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     session.commit()
-    shutil.copy2(database, destination)
+    with sqlite3.connect(database) as source_connection:
+        with sqlite3.connect(destination) as destination_connection:
+            source_connection.backup(destination_connection)
     return destination

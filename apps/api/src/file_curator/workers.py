@@ -31,6 +31,10 @@ class WorkerService:
     def wake(self) -> None:
         self._stop.wait(0)
 
+    @property
+    def is_alive(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
     def _recover_interrupted(self) -> None:
         with self.database.session_factory() as session:
             for job in session.query(ScanJob).filter_by(status="running").all():

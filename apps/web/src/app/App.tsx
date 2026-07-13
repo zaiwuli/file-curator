@@ -26,7 +26,7 @@ export function App() {
     {page==='review'&&<ReviewPage {...common} reviews={workspace.reviews} runs={workspace.runs}/>}
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 
-    {page==='history'&&<HistoryPage {...common} history={workspace.history} batches={workspace.batches}/>} 
-    {page==='settings'&&<SettingsPage locale={locale} setLocale={setLocale} notify={notify}/>} 
+    {page==='history'&&<HistoryPage {...common} history={workspace.history} batches={workspace.batches} backups={workspace.backups}/>}
+    {page==='settings'&&<SettingsPage {...common} locale={locale} setLocale={setLocale} sources={workspace.apiSources} schedules={workspace.schedules} diagnostics={workspace.diagnostics}/>}
   </div></main>{toast&&<div className="toast">{toast}</div>}</div>
 }

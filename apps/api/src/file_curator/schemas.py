@@ -263,6 +263,39 @@ class BatchRead(ORMModel):
     completed_at: datetime | None
 
 
+class PreflightRead(BaseModel):
+    status: Literal["ready"]
+    operation_count: int
+
+
+class RollbackPreviewItem(BaseModel):
+    operation_id: str
+    source_relative_path: str
+    target_relative_path: str
+    ready: bool
+    conflict: str | None = None
+
+
+class RollbackPreview(BaseModel):
+    batch_id: str
+    ready: bool
+    operations: list[RollbackPreviewItem]
+
+
+class BackupRead(BaseModel):
+    filename: str
+    size: int
+    created_at: datetime
+
+
+class DiagnosticsRead(BaseModel):
+    version: str
+    worker_alive: bool
+    database: str
+    config_writable: bool
+    counts: dict[str, int]
+
+
 class ScheduleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     source_id: str

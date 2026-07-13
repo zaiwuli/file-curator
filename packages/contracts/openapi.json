@@ -60,6 +60,30 @@
         "title": "AuditRead",
         "type": "object"
       },
+      "BackupRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "size",
+          "created_at"
+        ],
+        "title": "BackupRead",
+        "type": "object"
+      },
       "BatchRead": {
         "properties": {
           "completed_at": {
@@ -121,6 +145,42 @@
           "completed_at"
         ],
         "title": "BatchRead",
+        "type": "object"
+      },
+      "DiagnosticsRead": {
+        "properties": {
+          "config_writable": {
+            "title": "Config Writable",
+            "type": "boolean"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "worker_alive": {
+            "title": "Worker Alive",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "version",
+          "worker_alive",
+          "database",
+          "config_writable",
+          "counts"
+        ],
+        "title": "DiagnosticsRead",
         "type": "object"
       },
       "DuplicateCandidate": {
@@ -597,6 +657,25 @@
         "title": "PlanRead",
         "type": "object"
       },
+      "PreflightRead": {
+        "properties": {
+          "operation_count": {
+            "title": "Operation Count",
+            "type": "integer"
+          },
+          "status": {
+            "const": "ready",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "operation_count"
+        ],
+        "title": "PreflightRead",
+        "type": "object"
+      },
       "ProcessorConfig": {
         "properties": {
           "enabled": {
@@ -785,6 +864,71 @@
           "processors"
         ],
         "title": "ReviewItemRead",
+        "type": "object"
+      },
+      "RollbackPreview": {
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/RollbackPreviewItem"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "batch_id",
+          "ready",
+          "operations"
+        ],
+        "title": "RollbackPreview",
+        "type": "object"
+      },
+      "RollbackPreviewItem": {
+        "properties": {
+          "conflict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "source_relative_path": {
+            "title": "Source Relative Path",
+            "type": "string"
+          },
+          "target_relative_path": {
+            "title": "Target Relative Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "source_relative_path",
+          "target_relative_path",
+          "ready"
+        ],
+        "title": "RollbackPreviewItem",
         "type": "object"
       },
       "ScanCreate": {
@@ -1533,6 +1677,26 @@
   "openapi": "3.1.0",
   "paths": {
     "/api/backups": {
+      "get": {
+        "operationId": "list_backups_api_backups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackupRead"
+                  },
+                  "title": "Response List Backups Api Backups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backups"
+      },
       "post": {
         "operationId": "backup_api_backups_post",
         "responses": {
@@ -1546,6 +1710,38 @@
           }
         },
         "summary": "Backup"
+      }
+    },
+    "/api/backups/{filename}": {
+      "get": {
+        "operationId": "download_backup_api_backups__filename__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Backup"
       }
     },
     "/api/batches": {
@@ -1800,6 +1996,63 @@
           }
         },
         "summary": "Rollback"
+      }
+    },
+    "/api/batches/{batch_id}/rollback-preview": {
+      "get": {
+        "operationId": "rollback_preview_api_batches__batch_id__rollback_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollbackPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rollback Preview"
+      }
+    },
+    "/api/diagnostics": {
+      "get": {
+        "operationId": "diagnostics_api_diagnostics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Diagnostics"
       }
     },
     "/api/duplicates": {
@@ -2461,6 +2714,45 @@
           }
         },
         "summary": "Freeze"
+      }
+    },
+    "/api/plans/{plan_id}/preflight": {
+      "get": {
+        "operationId": "preflight_api_plans__plan_id__preflight_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "title": "Plan Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreflightRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preflight"
       }
     },
     "/api/processors": {

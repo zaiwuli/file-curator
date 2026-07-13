@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ApiSource, AuditLog, Batch, PipelineRun, PlanSummary, ProcessorManifest, ReviewItem, Source, Workflow } from '../types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, PipelineRun, PlanSummary, ProcessorManifest, ReviewItem, Schedule, Source, Workflow } from '../types'
 
 export function useWorkspace() {
   const [sources, setSources] = useState<Source[]>([])
@@ -12,23 +12,27 @@ export function useWorkspace() {
   const [plans, setPlans] = useState<PlanSummary[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [history, setHistory] = useState<AuditLog[]>([])
+  const [schedules,setSchedules]=useState<Schedule[]>([])
+  const [backups,setBackups]=useState<Backup[]>([])
+  const [diagnostics,setDiagnostics]=useState<Diagnostics|null>(null)
   const [state, setState] = useState<'loading'|'live'|'offline'>('loading')
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setState('loading'); setError(null)
     try {
-      const [, sourceRows, workflowRows, processorRows, runRows, reviewRows, planRows, batchRows, auditRows] = await Promise.all([
-        api.health(), api.sources(), api.workflows(), api.processors(), api.pipelineRuns(), api.reviews(), api.plans(), api.batches(), api.history(),
+      const [, sourceRows, workflowRows, processorRows, runRows, reviewRows, planRows, batchRows, auditRows, scheduleRows, backupRows, diagnosticRows] = await Promise.all([
+        api.health(), api.sources(), api.workflows(), api.processors(), api.pipelineRuns(), api.reviews(), api.plans(), api.batches(), api.history(), api.schedules(), api.backups(), api.diagnostics(),
       ])
       setApiSources(sourceRows)
       setSources(sourceRows.map(source => ({ id: source.id, name: source.name, path: source.root_path, status: source.enabled ? 'ready' : 'offline', files: 0, size: source.read_only ? 'Read only' : 'Writable', lastScan: 'Indexed locally' })))
       setWorkflows(workflowRows); setProcessors(processorRows); setRuns(runRows); setReviews(reviewRows); setPlans(planRows); setBatches(batchRows); setHistory(auditRows); setState('live')
+      setSchedules(scheduleRows); setBackups(backupRows); setDiagnostics(diagnosticRows)
     } catch (cause) {
       setState('offline'); setError(cause instanceof Error ? cause.message : 'api.unavailable')
     }
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
-  return { sources, apiSources, workflows, processors, runs, reviews, plans, batches, history, state, error, refresh }
+  return { sources, apiSources, workflows, processors, runs, reviews, plans, batches, history, schedules, backups, diagnostics, state, error, refresh }
 }

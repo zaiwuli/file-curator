@@ -1,3 +1,4 @@
+import os
 import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -27,11 +28,13 @@ from .db import (
     Workflow,
     WorkflowRevision,
 )
-from .filesystem import FileSafetyError, normalize_root, probe_capabilities
+from .filesystem import FileSafetyError, normalize_root, probe_capabilities, resolve_inside
 from .processors import create_default_registry
 from .schemas import (
     AuditRead,
+    BackupRead,
     BatchRead,
+    DiagnosticsRead,
     DuplicateCandidate,
     FileGroupRead,
     FilePage,
@@ -41,9 +44,11 @@ from .schemas import (
     PipelineRunRead,
     PlanCreate,
     PlanRead,
+    PreflightRead,
     ReviewDecisionRead,
     ReviewDecisionUpsert,
     ReviewItemRead,
+    RollbackPreview,
     ScanCreate,
     ScanRead,
     ScheduleCreate,
@@ -68,6 +73,7 @@ from .services import (
     create_manual_plan,
     create_plan_from_pipeline,
     freeze_plan,
+    preflight_plan,
     queue_plan_execution,
     rollback_batch,
     run_pipeline,
@@ -568,6 +574,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def freeze(plan_id: str, session: Session = Depends(session_dependency)):
         return freeze_plan(session, require(Plan, plan_id, session))
 
+    @app.get("/api/plans/{plan_id}/preflight", response_model=PreflightRead)
+    def preflight(plan_id: str, session: Session = Depends(session_dependency)):
+        return preflight_plan(session, require(Plan, plan_id, session))
+
     @app.post("/api/plans/{plan_id}/confirm", response_model=PlanRead)
     def confirm(plan_id: str, session: Session = Depends(session_dependency)):
         return confirm_plan(session, require(Plan, plan_id, session))
@@ -622,6 +632,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def rollback(batch_id: str, session: Session = Depends(session_dependency)):
         return rollback_batch(session, require(ExecutionBatch, batch_id, session))
 
+    @app.get("/api/batches/{batch_id}/rollback-preview", response_model=RollbackPreview)
+    def rollback_preview(batch_id: str, session: Session = Depends(session_dependency)):
+        batch = require(ExecutionBatch, batch_id, session)
+        plan = require(Plan, batch.plan_id, session)
+        source = require(Source, plan.source_id, session)
+        root = normalize_root(source.root_path)
+        successful_ids = {
+            log.operation_id
+            for log in session.query(AuditLog)
+            .filter_by(batch_id=batch.id, event="operation.executed", status="success")
+            .all()
+        }
+        items: list[dict[str, Any]] = []
+        for operation in reversed(plan.operations):
+            if operation.id not in successful_ids:
+                continue
+            current_relative = operation.target_relative_path
+            if operation.kind == "quarantine":
+                current_relative = (
+                    Path(settings.quarantine_name) / Path(operation.target_relative_path).name
+                ).as_posix()
+            current = resolve_inside(root, current_relative)
+            original = resolve_inside(root, operation.source_relative_path)
+            conflict = None
+            if not current.exists():
+                conflict = "rollback.current_missing"
+            elif original.exists():
+                conflict = "rollback.target_exists"
+            items.append(
+                {
+                    "operation_id": operation.id,
+                    "source_relative_path": current_relative,
+                    "target_relative_path": operation.source_relative_path,
+                    "ready": conflict is None,
+                    "conflict": conflict,
+                }
+            )
+        return {"batch_id": batch.id, "ready": all(item["ready"] for item in items), "operations": items}
+
     @app.get("/api/history", response_model=list[AuditRead])
     def history(
         limit: int = Query(200, ge=1, le=1000), session: Session = Depends(session_dependency)
@@ -632,6 +681,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def backup(session: Session = Depends(session_dependency)):
         path = create_backup(session, settings)
         return {"status": "completed", "filename": path.name}
+
+    @app.get("/api/backups", response_model=list[BackupRead])
+    def list_backups():
+        directory = settings.config_dir / "backups"
+        if not directory.exists():
+            return []
+        return [
+            {
+                "filename": path.name,
+                "size": path.stat().st_size,
+                "created_at": datetime.fromtimestamp(path.stat().st_mtime, UTC),
+            }
+            for path in sorted(directory.glob("file-curator-*.db"), reverse=True)
+            if path.is_file()
+        ]
+
+    @app.get("/api/backups/{filename}", response_class=FileResponse)
+    def download_backup(filename: str):
+        if Path(filename).name != filename:
+            raise HTTPException(400, detail="backup.invalid_filename")
+        path = settings.config_dir / "backups" / filename
+        if not path.is_file():
+            raise HTTPException(404, detail="backup.not_found")
+        return FileResponse(path, filename=filename, media_type="application/vnd.sqlite3")
+
+    @app.get("/api/diagnostics", response_model=DiagnosticsRead)
+    def diagnostics(session: Session = Depends(session_dependency)):
+        return {
+            "version": settings.version,
+            "worker_alive": worker.is_alive if settings.worker_enabled else False,
+            "database": Path(database.engine.url.database or "memory").name,
+            "config_writable": settings.config_dir.exists()
+            and os.access(settings.config_dir, os.W_OK),
+            "counts": {
+                "sources": session.query(Source).count(),
+                "files": session.query(FileEntry).filter_by(active=True).count(),
+                "workflows": session.query(Workflow).count(),
+                "plans": session.query(Plan).count(),
+                "batches": session.query(ExecutionBatch).count(),
+            },
+        }
 
     @app.post("/api/schedules", response_model=ScheduleRead, status_code=201)
     def create_schedule(payload: ScheduleCreate, session: Session = Depends(session_dependency)):

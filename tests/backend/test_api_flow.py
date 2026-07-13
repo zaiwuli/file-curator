@@ -1,4 +1,5 @@
 import time
+import sqlite3
 from pathlib import Path
 
 
@@ -62,6 +63,8 @@ def test_pipeline_plan_execute_and_rollback(client, media_root: Path) -> None:
     plan = plan_response.json()
     assert plan["operations"][0]["target_relative_path"] == "ABC-123 title.mp4"
     plan_id = plan["id"]
+    preflight = client.get(f"/api/plans/{plan_id}/preflight")
+    assert preflight.json() == {"status": "ready", "operation_count": 1}
     assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 200
     assert client.post(f"/api/plans/{plan_id}/confirm").status_code == 200
     batch_response = client.post("/api/batches", params={"plan_id": plan_id})
@@ -73,6 +76,9 @@ def test_pipeline_plan_execute_and_rollback(client, media_root: Path) -> None:
     )
     renamed = media_root / "ABC-123 title.mp4"
     assert renamed.exists() and not original.exists()
+    rollback_preview = client.get(f"/api/batches/{batch['id']}/rollback-preview").json()
+    assert rollback_preview["ready"] is True
+    assert rollback_preview["operations"][0]["ready"] is True
     rollback = client.post(f"/api/batches/{batch['id']}/rollback")
     assert rollback.status_code == 200, rollback.text
     assert original.exists() and not renamed.exists()
@@ -238,3 +244,55 @@ def test_file_browser_groups_and_workflow_portability(client, media_root: Path) 
     groups = client.get("/api/file-groups", params={"source_id": source_id}).json()
     assert len(groups) == 1
     assert len(groups[0]["member_ids"]) == 2
+
+
+def test_execution_continues_across_bounded_chunks(client, media_root: Path) -> None:
+    for index in range(3):
+        (media_root / f"before-{index}.txt").write_text(str(index), encoding="utf-8")
+    source_id, _ = create_source_and_scan(client, media_root)
+    workflow = client.post("/api/workflows", json={"name": "Chunked"}).json()
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source_id, "workflow_id": workflow["id"]},
+    ).json()
+    plan = client.post(
+        "/api/plans/manual",
+        json={
+            "run_id": run["id"],
+            "operations": [
+                {
+                    "kind": "rename",
+                    "source_relative_path": f"before-{index}.txt",
+                    "target_relative_path": f"after-{index}.txt",
+                }
+                for index in range(3)
+            ],
+        },
+    ).json()
+    assert client.post(f"/api/plans/{plan['id']}/freeze").status_code == 200
+    assert client.post(f"/api/plans/{plan['id']}/confirm").status_code == 200
+    client.app.state.settings.execution_batch_size = 1
+    batch = client.post("/api/batches", params={"plan_id": plan["id"]}).json()
+    completed = wait_for(client, f"/api/batches/{batch['id']}", {"completed", "failed"})
+    assert completed["status"] == "completed"
+    assert completed["succeeded"] == 3
+    assert all((media_root / f"after-{index}.txt").exists() for index in range(3))
+
+
+def test_online_backup_is_a_readable_sqlite_database(client) -> None:
+    response = client.post("/api/backups")
+    assert response.status_code == 200, response.text
+    backup_path = (
+        client.app.state.settings.config_dir / "backups" / response.json()["filename"]
+    )
+    with sqlite3.connect(backup_path) as connection:
+        table = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sources'"
+        ).fetchone()
+    assert table == ("sources",)
+    backups = client.get("/api/backups").json()
+    assert backups[0]["filename"] == response.json()["filename"]
+    assert client.get(f"/api/backups/{backups[0]['filename']}").status_code == 200
+    diagnostics = client.get("/api/diagnostics")
+    assert diagnostics.status_code == 200
+    assert diagnostics.json()["config_writable"] is True

@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Batch, FileGroup, FilePage, Health, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, StageResult, Workflow, WorkflowCompare, WorkflowPortable, WorkflowRevision } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, Schedule, StageResult, Workflow, WorkflowCompare, WorkflowPortable, WorkflowRevision } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -31,6 +31,9 @@ export const api = {
   plans: () => request<PlanSummary[]>('/plans'),
   batches: () => request<Batch[]>('/batches'),
   history: () => request<AuditLog[]>('/history'),
+  schedules: () => request<Schedule[]>('/schedules'),
+  backups: () => request<Backup[]>('/backups'),
+  diagnostics: () => request<Diagnostics>('/diagnostics'),
   createSource: (payload: { name: string; root_path: string; read_only: boolean }) => post<ApiSource>('/sources', { ...payload, exclusions: [], protected_paths: [] }),
   createScan: (sourceId: string) => post<{ id: string; status: string }>('/scans', { source_id: sourceId, mode: 'full' }),
   files: (params: { sourceId: string; search?: string; extension?: string; limit?: number; offset?: number }) => {
@@ -52,7 +55,19 @@ export const api = {
   createPlan: (run_id: string) => post<PlanSummary>('/plans', { run_id }),
   freezePlan: (id: string) => post<PlanSummary>(`/plans/${id}/freeze`),
   confirmPlan: (id: string) => post<PlanSummary>(`/plans/${id}/confirm`),
+  preflight: (id: string) => request<Preflight>(`/plans/${id}/preflight`),
   createBatch: (planId: string) => post<Batch>(`/batches?plan_id=${encodeURIComponent(planId)}`),
   batchAction: (id: string, action: 'pause'|'cancel'|'retry'|'rollback') => post<Batch>(`/batches/${id}/${action}`),
+  rollbackPreview: (id: string) => request<RollbackPreview>(`/batches/${id}/rollback-preview`),
   backup: () => post<{ status: string; filename: string }>('/backups'),
+  createSchedule: (payload: { name: string; source_id: string; interval_minutes: number; enabled: boolean }) => post<Schedule>('/schedules', payload),
+  updateSchedule: (id: string, payload: Partial<Pick<Schedule,'name'|'interval_minutes'|'enabled'>>) => request<Schedule>(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteSchedule: (id: string) => request<void>(`/schedules/${id}`, { method: 'DELETE' }),
+  downloadBackup: async (filename: string) => {
+    const token = window.localStorage.getItem('file-curator.admin-token')
+    const response = await fetch(`${apiBase}/backups/${encodeURIComponent(filename)}`, { headers: token ? { authorization: `Bearer ${token}` } : {} })
+    if (!response.ok) throw new Error(`backup.download_http_${response.status}`)
+    const url = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url)
+  },
 }
