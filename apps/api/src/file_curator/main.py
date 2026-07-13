@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -15,6 +16,7 @@ from .db import (
     Database,
     ExecutionBatch,
     FileEntry,
+    FileGroup,
     PipelineRun,
     Plan,
     ReviewDecision,
@@ -31,6 +33,8 @@ from .schemas import (
     AuditRead,
     BatchRead,
     DuplicateCandidate,
+    FileGroupRead,
+    FilePage,
     FileRead,
     ManualPlanCreate,
     PipelineRunCreate,
@@ -49,9 +53,12 @@ from .schemas import (
     SourceRead,
     SourceUpdate,
     StageResultRead,
+    WorkflowCompare,
     WorkflowCreate,
+    WorkflowPortable,
     WorkflowRead,
     WorkflowRevisionCreate,
+    WorkflowRevisionRead,
 )
 from .services import (
     DEFAULT_PROCESSORS,
@@ -249,6 +256,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             .all()
         )
 
+    @app.get("/api/files/page", response_model=FilePage)
+    def page_files(
+        source_id: str,
+        search: str | None = None,
+        extension: str | None = None,
+        min_size: int | None = Query(default=None, ge=0),
+        max_size: int | None = Query(default=None, ge=0),
+        include_directories: bool = False,
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+        session: Session = Depends(session_dependency),
+    ):
+        require(Source, source_id, session)
+        query = session.query(FileEntry).filter_by(source_id=source_id, active=True)
+        if not include_directories:
+            query = query.filter_by(is_dir=False)
+        if search:
+            query = query.filter(FileEntry.relative_path.ilike(f"%{search}%"))
+        if extension:
+            normalized_extension = extension if extension.startswith(".") else f".{extension}"
+            query = query.filter(func.lower(FileEntry.extension) == normalized_extension.lower())
+        if min_size is not None:
+            query = query.filter(FileEntry.size >= min_size)
+        if max_size is not None:
+            query = query.filter(FileEntry.size <= max_size)
+        total = query.count()
+        items = query.order_by(FileEntry.relative_path).offset(offset).limit(limit).all()
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+    @app.get("/api/file-groups", response_model=list[FileGroupRead])
+    def list_file_groups(
+        source_id: str,
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+        session: Session = Depends(session_dependency),
+    ):
+        require(Source, source_id, session)
+        return (
+            session.query(FileGroup)
+            .filter_by(source_id=source_id)
+            .order_by(FileGroup.group_key)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
     @app.post("/api/workflows", response_model=WorkflowRead, status_code=201)
     def create_workflow(payload: WorkflowCreate, session: Session = Depends(session_dependency)):
         workflow = Workflow(
@@ -269,6 +322,95 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/workflows", response_model=list[WorkflowRead])
     def list_workflows(session: Session = Depends(session_dependency)):
         return session.query(Workflow).order_by(Workflow.name).all()
+
+    @app.get(
+        "/api/workflows/{workflow_id}/revisions",
+        response_model=list[WorkflowRevisionRead],
+    )
+    def list_workflow_revisions(
+        workflow_id: str, session: Session = Depends(session_dependency)
+    ):
+        require(Workflow, workflow_id, session)
+        return (
+            session.query(WorkflowRevision)
+            .filter_by(workflow_id=workflow_id)
+            .order_by(WorkflowRevision.revision.desc())
+            .all()
+        )
+
+    @app.get("/api/workflows/{workflow_id}/export", response_model=WorkflowPortable)
+    def export_workflow(workflow_id: str, session: Session = Depends(session_dependency)):
+        workflow = require(Workflow, workflow_id, session)
+        revision = (
+            session.query(WorkflowRevision)
+            .filter_by(workflow_id=workflow.id, revision=workflow.current_revision)
+            .one()
+        )
+        return {
+            "schema_version": 1,
+            "name": workflow.name,
+            "preset": workflow.preset,
+            "review_policy": workflow.review_policy,
+            "processors": revision.config.get("processors", []),
+        }
+
+    @app.post("/api/workflows/import", response_model=WorkflowRead, status_code=201)
+    def import_workflow(payload: WorkflowPortable, session: Session = Depends(session_dependency)):
+        registry.validate_order([item.id for item in payload.processors if item.enabled])
+        workflow = Workflow(
+            name=payload.name,
+            preset=payload.preset,
+            review_policy=payload.review_policy,
+        )
+        session.add(workflow)
+        session.flush()
+        session.add(
+            WorkflowRevision(
+                workflow_id=workflow.id,
+                revision=1,
+                config={"processors": [item.model_dump() for item in payload.processors]},
+            )
+        )
+        session.commit()
+        return workflow
+
+    @app.get("/api/workflows/{workflow_id}/compare", response_model=WorkflowCompare)
+    def compare_workflow_revisions(
+        workflow_id: str,
+        from_revision: int = Query(ge=1),
+        to_revision: int = Query(ge=1),
+        session: Session = Depends(session_dependency),
+    ):
+        require(Workflow, workflow_id, session)
+        revisions = (
+            session.query(WorkflowRevision)
+            .filter(
+                WorkflowRevision.workflow_id == workflow_id,
+                WorkflowRevision.revision.in_([from_revision, to_revision]),
+            )
+            .all()
+        )
+        by_number = {revision.revision: revision for revision in revisions}
+        if from_revision not in by_number or to_revision not in by_number:
+            raise HTTPException(404, detail="workflow.revision_not_found")
+        before = {
+            item["id"]: item
+            for item in by_number[from_revision].config.get("processors", [])
+        }
+        after = {
+            item["id"]: item for item in by_number[to_revision].config.get("processors", [])
+        }
+        before_ids, after_ids = set(before), set(after)
+        shared = before_ids & after_ids
+        return {
+            "workflow_id": workflow_id,
+            "from_revision": from_revision,
+            "to_revision": to_revision,
+            "added": sorted(after_ids - before_ids),
+            "removed": sorted(before_ids - after_ids),
+            "changed": sorted(identifier for identifier in shared if before[identifier] != after[identifier]),
+            "unchanged": sorted(identifier for identifier in shared if before[identifier] == after[identifier]),
+        }
 
     @app.post("/api/workflows/{workflow_id}/revisions", response_model=WorkflowRead)
     def revise_workflow(

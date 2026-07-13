@@ -186,3 +186,55 @@ def test_review_decisions_gate_and_override_plan_operations(client, media_root: 
     kept_plan = client.post("/api/plans", json={"run_id": run["id"]}).json()
     assert kept_plan["operations"] == []
     assert kept_plan["summary"]["kept_count"] == 1
+
+
+def test_file_browser_groups_and_workflow_portability(client, media_root: Path) -> None:
+    (media_root / "Movie (1).mkv").write_bytes(b"video")
+    (media_root / "Movie (2).srt").write_bytes(b"subtitle")
+    (media_root / "notes.txt").write_text("notes", encoding="utf-8")
+    source_id, _ = create_source_and_scan(client, media_root)
+
+    page = client.get(
+        "/api/files/page",
+        params={"source_id": source_id, "search": "movie", "extension": "mkv"},
+    )
+    assert page.status_code == 200, page.text
+    assert page.json()["total"] == 1
+    assert page.json()["items"][0]["relative_path"] == "Movie (1).mkv"
+
+    workflow = client.post(
+        "/api/workflows",
+        json={"name": "Portable", "processors": [{"id": "extract_sequence"}]},
+    ).json()
+    client.post(
+        f"/api/workflows/{workflow['id']}/revisions",
+        json={
+            "processors": [
+                {"id": "extract_sequence", "enabled": True},
+                {"id": "normalize_name", "enabled": True},
+            ]
+        },
+    )
+    revisions = client.get(f"/api/workflows/{workflow['id']}/revisions").json()
+    assert [item["revision"] for item in revisions] == [2, 1]
+    comparison = client.get(
+        f"/api/workflows/{workflow['id']}/compare",
+        params={"from_revision": 1, "to_revision": 2},
+    ).json()
+    assert comparison["added"] == ["normalize_name"]
+    assert comparison["unchanged"] == ["extract_sequence"]
+
+    exported = client.get(f"/api/workflows/{workflow['id']}/export").json()
+    exported["name"] = "Imported copy"
+    imported = client.post("/api/workflows/import", json=exported)
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["name"] == "Imported copy"
+
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source_id, "workflow_id": workflow["id"]},
+    )
+    assert run.status_code == 201, run.text
+    groups = client.get("/api/file-groups", params={"source_id": source_id}).json()
+    assert len(groups) == 1
+    assert len(groups[0]["member_ids"]) == 2

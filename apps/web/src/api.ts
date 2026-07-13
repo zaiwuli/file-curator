@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Batch, Health, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, StageResult, Workflow } from './types'
+import type { ApiSource, AuditLog, Batch, FileGroup, FilePage, Health, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, StageResult, Workflow, WorkflowCompare, WorkflowPortable, WorkflowRevision } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -33,8 +33,19 @@ export const api = {
   history: () => request<AuditLog[]>('/history'),
   createSource: (payload: { name: string; root_path: string; read_only: boolean }) => post<ApiSource>('/sources', { ...payload, exclusions: [], protected_paths: [] }),
   createScan: (sourceId: string) => post<{ id: string; status: string }>('/scans', { source_id: sourceId, mode: 'full' }),
+  files: (params: { sourceId: string; search?: string; extension?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams({ source_id: params.sourceId, limit: String(params.limit ?? 100), offset: String(params.offset ?? 0) })
+    if (params.search) query.set('search', params.search)
+    if (params.extension) query.set('extension', params.extension)
+    return request<FilePage>(`/files/page?${query}`)
+  },
+  fileGroups: (sourceId: string) => request<FileGroup[]>(`/file-groups?source_id=${encodeURIComponent(sourceId)}`),
   createWorkflow: (payload: { name: string; preset: string; review_policy: string; processors: ProcessorConfig[] }) => post<Workflow>('/workflows', payload),
   reviseWorkflow: (id: string, processors: ProcessorConfig[], review_policy: string) => post<Workflow>(`/workflows/${id}/revisions`, { processors, review_policy }),
+  workflowRevisions: (id: string) => request<WorkflowRevision[]>(`/workflows/${id}/revisions`),
+  exportWorkflow: (id: string) => request<WorkflowPortable>(`/workflows/${id}/export`),
+  importWorkflow: (payload: WorkflowPortable) => post<Workflow>('/workflows/import', payload),
+  compareWorkflow: (id: string, from: number, to: number) => request<WorkflowCompare>(`/workflows/${id}/compare?from_revision=${from}&to_revision=${to}`),
   runPipeline: (source_id: string, workflow_id: string) => post<PipelineRun>('/pipeline-runs', { source_id, workflow_id }),
   trace: (runId: string) => request<StageResult[]>(`/pipeline-runs/${runId}/trace`),
   decideReview: (runId: string, fileEntryId: string, payload: { action: 'accept'|'keep'|'override'; target_relative_path?: string; note?: string }) => request<ReviewDecision>(`/reviews/${runId}/${fileEntryId}`, { method: 'PUT', body: JSON.stringify(payload) }),

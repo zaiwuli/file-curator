@@ -189,6 +189,86 @@
         "title": "DuplicateMember",
         "type": "object"
       },
+      "FileGroupRead": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "group_key": {
+            "title": "Group Key",
+            "type": "string"
+          },
+          "group_type": {
+            "title": "Group Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "group_key",
+          "group_type",
+          "member_ids",
+          "confidence",
+          "reasons"
+        ],
+        "title": "FileGroupRead",
+        "type": "object"
+      },
+      "FilePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FileRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "FilePage",
+        "type": "object"
+      },
       "FileRead": {
         "properties": {
           "extension": {
@@ -1199,6 +1279,61 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WorkflowCompare": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "from_revision": {
+            "title": "From Revision",
+            "type": "integer"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "to_revision": {
+            "title": "To Revision",
+            "type": "integer"
+          },
+          "unchanged": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unchanged",
+            "type": "array"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow_id",
+          "from_revision",
+          "to_revision",
+          "added",
+          "removed",
+          "changed",
+          "unchanged"
+        ],
+        "title": "WorkflowCompare",
+        "type": "object"
+      },
       "WorkflowCreate": {
         "properties": {
           "name": {
@@ -1239,6 +1374,54 @@
           "name"
         ],
         "title": "WorkflowCreate",
+        "type": "object"
+      },
+      "WorkflowPortable": {
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "preset": {
+            "default": "rename_only",
+            "enum": [
+              "rename_only",
+              "rename_and_organize"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "processors": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessorConfig"
+            },
+            "title": "Processors",
+            "type": "array"
+          },
+          "review_policy": {
+            "default": "balanced",
+            "enum": [
+              "conservative",
+              "balanced",
+              "automatic"
+            ],
+            "title": "Review Policy",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "processors"
+        ],
+        "title": "WorkflowPortable",
         "type": "object"
       },
       "WorkflowRead": {
@@ -1304,6 +1487,41 @@
           "processors"
         ],
         "title": "WorkflowRevisionCreate",
+        "type": "object"
+      },
+      "WorkflowRevisionRead": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "workflow_id": {
+            "title": "Workflow Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workflow_id",
+          "revision",
+          "config",
+          "created_at"
+        ],
+        "title": "WorkflowRevisionRead",
         "type": "object"
       }
     }
@@ -1638,6 +1856,72 @@
         "summary": "Duplicate Candidates"
       }
     },
+    "/api/file-groups": {
+      "get": {
+        "operationId": "list_file_groups_api_file_groups_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FileGroupRead"
+                  },
+                  "title": "Response List File Groups Api File Groups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List File Groups"
+      }
+    },
     "/api/files": {
       "get": {
         "operationId": "list_files_api_files_get",
@@ -1702,6 +1986,144 @@
           }
         },
         "summary": "List Files"
+      }
+    },
+    "/api/files/page": {
+      "get": {
+        "operationId": "page_files_api_files_page_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "extension",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Extension"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Size"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Size"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_directories",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Directories",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Page Files"
       }
     },
     "/api/history": {
@@ -2767,7 +3189,184 @@
         "summary": "Create Workflow"
       }
     },
+    "/api/workflows/import": {
+      "post": {
+        "operationId": "import_workflow_api_workflows_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowPortable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Workflow"
+      }
+    },
+    "/api/workflows/{workflow_id}/compare": {
+      "get": {
+        "operationId": "compare_workflow_revisions_api_workflows__workflow_id__compare_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_revision",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "From Revision",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_revision",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "To Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowCompare"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare Workflow Revisions"
+      }
+    },
+    "/api/workflows/{workflow_id}/export": {
+      "get": {
+        "operationId": "export_workflow_api_workflows__workflow_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowPortable"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Workflow"
+      }
+    },
     "/api/workflows/{workflow_id}/revisions": {
+      "get": {
+        "operationId": "list_workflow_revisions_api_workflows__workflow_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkflowRevisionRead"
+                  },
+                  "title": "Response List Workflow Revisions Api Workflows  Workflow Id  Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workflow Revisions"
+      },
       "post": {
         "operationId": "revise_workflow_api_workflows__workflow_id__revisions_post",
         "parameters": [

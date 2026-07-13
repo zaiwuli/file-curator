@@ -64,6 +64,23 @@ class FileRead(ORMModel):
     is_dir: bool
 
 
+class FilePage(BaseModel):
+    items: list[FileRead]
+    total: int
+    limit: int
+    offset: int
+
+
+class FileGroupRead(ORMModel):
+    id: str
+    source_id: str
+    group_key: str
+    group_type: str
+    member_ids: list[str]
+    confidence: float
+    reasons: list[str]
+
+
 class ProcessorConfig(BaseModel):
     id: str
     enabled: bool = True
@@ -83,6 +100,32 @@ class WorkflowRead(ORMModel):
     preset: str
     review_policy: str
     current_revision: int
+
+
+class WorkflowRevisionRead(ORMModel):
+    id: str
+    workflow_id: str
+    revision: int
+    config: dict[str, Any]
+    created_at: datetime
+
+
+class WorkflowPortable(BaseModel):
+    schema_version: Literal[1] = 1
+    name: str = Field(min_length=1, max_length=200)
+    preset: Literal["rename_only", "rename_and_organize"] = "rename_only"
+    review_policy: Literal["conservative", "balanced", "automatic"] = "balanced"
+    processors: list[ProcessorConfig]
+
+
+class WorkflowCompare(BaseModel):
+    workflow_id: str
+    from_revision: int
+    to_revision: int
+    added: list[str]
+    removed: list[str]
+    changed: list[str]
+    unchanged: list[str]
 
 
 class WorkflowRevisionCreate(BaseModel):
