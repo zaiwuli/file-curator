@@ -1,8 +1,11 @@
-export type Page = 'dashboard' | 'sources' | 'files' | 'pipeline' | 'review' | 'preview' | 'execution' | 'history' | 'settings'
+export type Page = 'dashboard' | 'sources' | 'files' | 'pipeline' | 'junk' | 'review' | 'preview' | 'execution' | 'history' | 'settings'
 export type Source = { id: string; name: string; path: string; status: 'ready'|'offline'|'scanning'; files: number; size: string; lastScan: string }
 export type ApiSource = { id: string; name: string; root_path: string; enabled: boolean; read_only: boolean; exclusions: string[]; protected_paths: string[]; capabilities: Record<string, boolean|string> }
 export type ProcessorConfig = { id: string; enabled: boolean; options: Record<string, unknown> }
 export type ProcessorManifest = { id: string; version: string; category: string; requires: string[]; provides: string[]; default_enabled: boolean; score_weight: number; safety_class: string; option_schema: Record<string,unknown> }
+export type JunkRule = { id: string; name: string; description: string; action: 'keep'|'review'|'quarantine'; score: number; extensions: string[]; filename_contains: string[]; filename_regex: string[]; path_contains: string[]; max_size: number|null; min_size: number|null; empty_only: boolean }
+export type JunkRulePack = { id: string; version: string; name: string; description: string; protected_extensions: string[]; rules: JunkRule[] }
+export type JunkRulePackValidation = { valid: boolean; errors: string[]; warnings: string[]; rule_count: number }
 export type Workflow = { id: string; name: string; preset: string; review_policy: string; current_revision: number }
 export type WorkflowRevision = { id: string; workflow_id: string; revision: number; config: { processors?: ProcessorConfig[] }; created_at: string }
 export type WorkflowCompare = { workflow_id: string; from_revision: number; to_revision: number; added: string[]; removed: string[]; changed: string[]; unchanged: string[] }

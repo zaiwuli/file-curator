@@ -275,16 +275,54 @@ class JunkDetector(Processor):
         "detect",
         provides=("junk_candidate",),
         score_weight=0.1,
-        option_schema={"extensions": {"type": "array", "items": {"type": "string"}}},
+        option_schema={
+            "pack_id": {"type": "string", "default": "bt-advertisement-and-junk"},
+            "extensions": {"type": "array", "items": {"type": "string"}},
+            "filename_contains": {"type": "array", "items": {"type": "string"}},
+            "protected_extensions": {"type": "array", "items": {"type": "string"}},
+        },
     )
     defaults = {".tmp", ".part", ".download", ".crdownload"}
 
     def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
-        extensions = set(options.get("extensions", self.defaults))
-        if context.extension.lower() not in extensions and context.size != 0:
+        from .junk_rules import DEFAULT_JUNK_PACK, evaluate_junk
+
+        pack = DEFAULT_JUNK_PACK
+        extensions = tuple(options.get("extensions", ()))
+        keywords = tuple(options.get("filename_contains", ()))
+        if extensions or keywords or options.get("protected_extensions"):
+            from .junk_rules import JunkRule, JunkRulePack
+
+            rules = list(pack.rules)
+            if extensions:
+                rules.insert(0, JunkRule("custom.extension", "Custom junk extension", "Configured junk extension.", "quarantine", 70, extensions=extensions))
+            if keywords:
+                rules.insert(0, JunkRule("custom.keyword", "Custom junk keyword", "Configured junk filename keyword.", "quarantine", 55, filename_contains=keywords))
+            pack = JunkRulePack(
+                pack.id,
+                pack.version,
+                pack.name,
+                pack.description,
+                tuple(rules),
+                tuple(options.get("protected_extensions", pack.protected_extensions)),
+            )
+        evaluation = evaluate_junk(context, pack)
+        if not evaluation.candidate:
             return ProcessorResult(status="skipped")
+        evidence = [
+            {"rule_id": item.rule_id, "action": item.action, "score": item.score, "reason": item.reason, "matched_value": item.matched_value}
+            for item in evaluation.evidence
+        ]
         return ProcessorResult(
-            confidence_delta=0.1, fields={"junk_candidate": True}, reasons=["junk.candidate"]
+            status="review" if evaluation.action == "review" else "matched",
+            confidence_delta=min(0.5, evaluation.score / 100),
+            fields={
+                "junk_candidate": True,
+                "junk_action": evaluation.action,
+                "junk_score": evaluation.score,
+                "junk_evidence": evidence,
+            },
+            reasons=[item.reason for item in evaluation.evidence],
         )
 
 

@@ -89,6 +89,37 @@ class ProcessorConfig(BaseModel):
     options: dict[str, Any] = {}
 
 
+class JunkRule(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    action: Literal["keep", "review", "quarantine"] = "review"
+    score: int = Field(default=0, ge=0, le=100)
+    extensions: list[str] = []
+    filename_contains: list[str] = []
+    filename_regex: list[str] = []
+    path_contains: list[str] = []
+    max_size: int | None = Field(default=None, ge=0)
+    min_size: int | None = Field(default=None, ge=0)
+    empty_only: bool = False
+
+
+class JunkRulePack(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
+    version: str = "1.0.0"
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    protected_extensions: list[str] = [".srt", ".ass", ".ssa", ".nfo"]
+    rules: list[JunkRule] = []
+
+
+class JunkRulePackValidation(BaseModel):
+    valid: bool
+    errors: list[str] = []
+    warnings: list[str] = []
+    rule_count: int = 0
+
+
 class Condition(BaseModel):
     field: str
     operator: Literal[

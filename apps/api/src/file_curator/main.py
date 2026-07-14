@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -29,6 +30,7 @@ from .db import (
     WorkflowRevision,
 )
 from .filesystem import FileSafetyError, normalize_root, probe_capabilities, resolve_inside
+from .junk_rules import DEFAULT_JUNK_PACK, junk_pack_dict
 from .processors import ProcessingContext, create_default_registry
 from .schemas import (
     AuditRead,
@@ -39,6 +41,8 @@ from .schemas import (
     FileGroupRead,
     FilePage,
     FileRead,
+    JunkRulePack,
+    JunkRulePackValidation,
     ManualPlanCreate,
     PipelineRunCreate,
     PipelineRunRead,
@@ -170,6 +174,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/processors")
     def processors() -> list[dict[str, Any]]:
         return [manifest.__dict__ for manifest in registry.manifests()]
+
+    @app.get("/api/junk-rule-packs", response_model=list[JunkRulePack])
+    def junk_rule_packs():
+        return [junk_pack_dict(DEFAULT_JUNK_PACK)]
+
+    @app.post("/api/junk-rule-packs/validate", response_model=JunkRulePackValidation)
+    def validate_junk_rule_pack(payload: JunkRulePack):
+        errors: list[str] = []
+        warnings: list[str] = []
+        seen: set[str] = set()
+        for rule in payload.rules:
+            if rule.id in seen:
+                errors.append(f"junk.duplicate_rule:{rule.id}")
+            seen.add(rule.id)
+            for pattern in rule.filename_regex:
+                try:
+                    re.compile(pattern)
+                except re.error:
+                    errors.append(f"junk.invalid_regex:{rule.id}")
+            if not rule.extensions and not rule.filename_contains and not rule.filename_regex and not rule.path_contains and not rule.empty_only:
+                warnings.append(f"junk.unbounded_rule:{rule.id}")
+        if not payload.rules:
+            errors.append("junk.empty_pack")
+        return JunkRulePackValidation(
+            valid=not errors,
+            errors=errors,
+            warnings=sorted(set(warnings)),
+            rule_count=len(payload.rules),
+        )
 
     @app.get("/api/workflow-templates", response_model=list[WorkflowTemplateV2])
     def list_builtin_templates():

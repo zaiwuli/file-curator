@@ -7,11 +7,12 @@ import { DashboardPage } from '../pages/DashboardPage'
 import { SourcesPage } from '../pages/SourcesPage'
 import { FileBrowserPage } from '../pages/FileBrowserPage'
 import { ExecutionPage, HistoryPage, PreviewPage, ReviewPage, SettingsPage } from '../pages/WorkbenchPages'
+import { JunkRulesPage } from '../pages/JunkRulesPage'
 import { WorkflowBuilderV2 } from '../pages/WorkflowBuilderV2'
 import type { Page } from '../types'
 
 const navItems: { id: Page; label: string; icon: React.ComponentType<{size?:number}> }[] = [
-  {id:'dashboard',label:'Dashboard',icon:LayoutDashboard}, {id:'sources',label:'Sources',icon:Database}, {id:'files',label:'File browser',icon:FileSearch}, {id:'pipeline',label:'Pipeline',icon:WorkflowIcon}, {id:'review',label:'Review center',icon:ListChecks}, {id:'preview',label:'Virtual preview',icon:Folder}, {id:'execution',label:'Execution',icon:Play}, {id:'history',label:'History',icon:HistoryIcon}, {id:'settings',label:'Settings',icon:SettingsIcon},
+  {id:'dashboard',label:'Dashboard',icon:LayoutDashboard}, {id:'sources',label:'Sources',icon:Database}, {id:'files',label:'File browser',icon:FileSearch}, {id:'pipeline',label:'Pipeline',icon:WorkflowIcon}, {id:'junk',label:'Junk rules',icon:ShieldCheck}, {id:'review',label:'Review center',icon:ListChecks}, {id:'preview',label:'Virtual preview',icon:Folder}, {id:'execution',label:'Execution',icon:Play}, {id:'history',label:'History',icon:HistoryIcon}, {id:'settings',label:'Settings',icon:SettingsIcon},
 ]
 
 export function App() {
@@ -25,6 +26,7 @@ export function App() {
     {page==='sources'&&<SourcesPage notify={notify} data={workspace.sources} state={workspace.state} error={workspace.error} refresh={workspace.refresh}/>} 
     {page==='files'&&<FileBrowserPage sources={workspace.apiSources} notify={notify}/>}
     {page==='pipeline'&&<WorkflowBuilderV2 {...common} sources={workspace.apiSources} workflows={workspace.workflows} openPreview={()=>setPage('preview')}/>}
+    {page==='junk'&&<JunkRulesPage notify={notify}/>}
     {page==='review'&&<ReviewPage {...common} reviews={workspace.reviews} runs={workspace.runs}/>}
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 

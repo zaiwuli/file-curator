@@ -23,6 +23,7 @@ logs/
 backups/
 exports/
 .runtime/
+acceptance-fixture-*/
 *.db
 *.db-shm
 *.db-wal

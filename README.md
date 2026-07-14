@@ -85,6 +85,8 @@ Version 1.0 includes local sources, metadata and opt-in hash scans, file browsin
 
 Workflow Engine 2.0 adds eight ordered processing gates, visual condition and action cards, built-in templates, YAML/JSON import and export, legacy v1 conversion, multi-date extraction, protected number cleanup, parent-folder inheritance, same-source archive and move actions, quarantine review, conflict policies, single-rule testing, and impact summaries. Raw JSON is kept in an optional developer section; common rules can be configured through forms.
 
+The v2.1 junk-rule foundation adds a versioned BT advertisement and junk rule pack, metadata-only keyword/regex/extension/path/size checks, protected sidecar extensions, explainable evidence and scores, custom processor options, rule-pack validation APIs, and a desktop rule-library page. Matches remain review or quarantine candidates; permanent deletion is still unsupported.
+
 The desktop UI supports English and Simplified Chinese and is wired to source, browser, workflow, review, plan, execution, recovery, scheduling, backup, and diagnostics APIs. Content hashing remains explicitly opt-in. Restore a backup while the service is stopped with `python -m file_curator restore-backup --backup FILE.db`.
 
 Set `FILE_CURATOR_WEBHOOK_URL` to receive scan and execution completion summaries. The payload contains job identifiers, status, and counters; it does not include file paths. Docker image execution is validated in CI because a Docker engine is not required for local frontend/backend development.
