@@ -89,6 +89,115 @@ class ProcessorConfig(BaseModel):
     options: dict[str, Any] = {}
 
 
+class Condition(BaseModel):
+    field: str
+    operator: Literal[
+        "equals", "not_equals", "contains", "not_contains", "starts_with", "ends_with",
+        "regex", "in", "greater_than", "less_than", "is_true", "is_false",
+    ]
+    value: Any = None
+
+
+class ConditionGroup(BaseModel):
+    mode: Literal["all", "any", "not"] = "all"
+    conditions: list[Condition] = []
+    groups: list["ConditionGroup"] = []
+
+
+class WorkflowAction(BaseModel):
+    kind: Literal[
+        "run_processor", "extract_dates", "clean_name", "remove_number_patterns",
+        "inherit_parent", "render_name", "keep", "move", "archive", "quarantine",
+        "skip", "require_review",
+    ]
+    options: dict[str, Any] = {}
+
+
+class RuleCard(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=1000)
+    enabled: bool = True
+    order: int = Field(default=0, ge=0)
+    conditions: ConditionGroup = ConditionGroup()
+    actions: list[WorkflowAction] = []
+    on_match: Literal["continue", "stop", "skip", "review"] = "continue"
+
+
+class WorkflowStage(BaseModel):
+    id: Literal[
+        "scope", "filter", "extract", "clean", "classify", "target", "review", "execute"
+    ]
+    enabled: bool = True
+    rules: list[RuleCard] = []
+
+
+class TemplateExample(BaseModel):
+    input_path: str
+    expected_path: str | None = None
+    expected_action: str | None = None
+
+
+class WorkflowTemplateV2(BaseModel):
+    schema_version: Literal[2] = 2
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    minimum_version: str = "1.0.0"
+    preset: Literal["rename_only", "rename_and_organize"] = "rename_only"
+    review_policy: Literal["conservative", "balanced", "automatic"] = "balanced"
+    conflict_policy: Literal["review", "append_number", "skip", "stop"] = "review"
+    required_processors: dict[str, str] = {}
+    stages: list[WorkflowStage]
+    examples: list[TemplateExample] = []
+
+
+class TemplateTextInput(BaseModel):
+    content: str = Field(min_length=2, max_length=1_000_000)
+    format: Literal["auto", "yaml", "json"] = "auto"
+
+
+class TemplateValidationResult(BaseModel):
+    valid: bool
+    template: WorkflowTemplateV2 | None = None
+    errors: list[str] = []
+    warnings: list[str] = []
+    missing_processors: list[str] = []
+    risks: list[str] = []
+
+
+class TemplateImportInput(TemplateTextInput):
+    source_id: str | None = None
+
+
+class RuleTestInput(BaseModel):
+    rule: RuleCard
+    relative_path: str
+    size: int = Field(default=0, ge=0)
+    mtime_ns: int = Field(default=0, ge=0)
+
+
+class RuleTestResult(BaseModel):
+    matched: bool
+    status: str
+    input: dict[str, Any]
+    output: dict[str, Any]
+    reasons: list[str]
+    warnings: list[str]
+
+
+class WorkflowImpactSummary(BaseModel):
+    workflow_id: str
+    source_id: str
+    total: int
+    rename: int
+    move: int
+    archive: int
+    quarantine: int
+    unchanged: int
+    conflicts: int
+    review: int
+
+
 class WorkflowCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     preset: Literal["rename_only", "rename_and_organize"] = "rename_only"

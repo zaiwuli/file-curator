@@ -25,6 +25,8 @@ from .db import (
 from .filesystem import FileSafetyError, normalize_root, resolve_inside
 from .processors import ProcessingContext, ProcessorRegistry
 from .schemas import ManualPlanCreate, ProcessorConfig
+from .workflow_engine import run_template_entry
+from .workflow_templates import template_from_revision
 
 
 class DomainError(RuntimeError):
@@ -94,7 +96,13 @@ def run_pipeline(
     revision = get_revision(session, workflow)
     processors = revision.config.get("processors", [])
     enabled = [item for item in processors if item.get("enabled", True)]
-    registry.validate_order([item["id"] for item in enabled])
+    template = (
+        template_from_revision(workflow.name, workflow.preset, workflow.review_policy, revision.config)
+        if "template" in revision.config
+        else None
+    )
+    if template is None:
+        registry.validate_order([item["id"] for item in enabled])
     run = PipelineRun(
         source_id=source.id,
         workflow_id=workflow.id,
@@ -117,43 +125,61 @@ def run_pipeline(
             size=entry.size,
             mtime_ns=entry.mtime_ns,
         )
-        for item in enabled:
-            processor = registry.get(item["id"])
-            input_data = {
-                "name": context.proposed_name or context.original_name,
-                "parent": context.proposed_parent or context.parent_path,
-                "fields": dict(context.fields),
-            }
-            result = processor.process(context, item.get("options", {}))
-            context.fields.update(result.fields)
-            if result.proposed_name is not None:
-                context.proposed_name = result.proposed_name
-            if result.proposed_parent is not None:
-                context.proposed_parent = result.proposed_parent
-            context.confidence = max(0.0, min(1.0, context.confidence + result.confidence_delta))
-            context.reasons.extend(result.reasons)
-            context.warnings.extend(result.warnings)
-            session.add(
-                StageResult(
+        if template:
+            traces = run_template_entry(template, context, registry)
+            for trace in traces:
+                session.add(StageResult(
                     run_id=run.id,
                     file_entry_id=entry.id,
-                    processor_id=processor.manifest.id,
-                    processor_version=processor.manifest.version,
-                    status=result.status,
+                    processor_id=trace.rule_id,
+                    processor_version="2.0.0",
+                    status=trace.status,
                     confidence=context.confidence,
-                    input_data=input_data,
-                    output_data={
-                        "fields": dict(context.fields),
-                        "proposed_name": context.proposed_name,
-                        "proposed_parent": context.proposed_parent,
-                    },
-                    reasons=result.reasons,
-                    warnings=result.warnings,
+                    input_data=trace.input_data,
+                    output_data=trace.output_data,
+                    reasons=trace.reasons,
+                    warnings=trace.warnings,
+                ))
+                if trace.status in {"review", "warning"}:
+                    review += 1
+        else:
+            for item in enabled:
+                processor = registry.get(item["id"])
+                input_data = {
+                    "name": context.proposed_name or context.original_name,
+                    "parent": context.proposed_parent or context.parent_path,
+                    "fields": dict(context.fields),
+                }
+                result = processor.process(context, item.get("options", {}))
+                context.fields.update(result.fields)
+                if result.proposed_name is not None:
+                    context.proposed_name = result.proposed_name
+                if result.proposed_parent is not None:
+                    context.proposed_parent = result.proposed_parent
+                context.confidence = max(0.0, min(1.0, context.confidence + result.confidence_delta))
+                context.reasons.extend(result.reasons)
+                context.warnings.extend(result.warnings)
+                session.add(
+                    StageResult(
+                        run_id=run.id,
+                        file_entry_id=entry.id,
+                        processor_id=processor.manifest.id,
+                        processor_version=processor.manifest.version,
+                        status=result.status,
+                        confidence=context.confidence,
+                        input_data=input_data,
+                        output_data={
+                            "fields": dict(context.fields),
+                            "proposed_name": context.proposed_name,
+                            "proposed_parent": context.proposed_parent,
+                        },
+                        reasons=result.reasons,
+                        warnings=result.warnings,
+                    )
                 )
-            )
-            if result.status in {"review", "warning"}:
-                review += 1
-        if context.proposed_name or context.proposed_parent:
+                if result.status in {"review", "warning"}:
+                    review += 1
+        if (context.proposed_name or context.proposed_parent) and not context.fields.get("skip"):
             changed += 1
     groups = rebuild_file_groups(session, source.id, entries)
     run.status = "review" if review else "completed"
@@ -210,7 +236,8 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
         target_parent = Path(target).parent.as_posix()
         if target_parent == ".":
             target_parent = ""
-        kind = "rename" if target_parent == entry.parent_path else "move"
+        requested_kind = result.output_data.get("fields", {}).get("operation_kind")
+        kind = "quarantine" if requested_kind == "quarantine" else "rename" if target_parent == entry.parent_path else "move"
         reasons = list(result.reasons)
         if decision:
             reasons.append(f"review.{decision.action}")

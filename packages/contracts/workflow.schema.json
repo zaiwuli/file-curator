@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://file-curator.local/schemas/workflow-v2.json",
+  "title": "File Curator Workflow Template v2",
+  "type": "object",
+  "required": ["schema_version", "name", "stages"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "description": { "type": "string" },
+    "minimum_version": { "type": "string", "default": "1.0.0" },
+    "preset": { "enum": ["rename_only", "rename_and_organize"] },
+    "review_policy": { "enum": ["conservative", "balanced", "automatic"] },
+    "conflict_policy": { "enum": ["review", "append_number", "skip", "stop"] },
+    "required_processors": { "type": "object", "additionalProperties": { "type": "string" } },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "rules"],
+        "properties": {
+          "id": { "enum": ["scope", "filter", "extract", "clean", "classify", "target", "review", "execute"] },
+          "enabled": { "type": "boolean" },
+          "rules": { "type": "array" }
+        }
+      }
+    },
+    "examples": { "type": "array" }
+  }
+}

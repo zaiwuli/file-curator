@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ from .db import (
     WorkflowRevision,
 )
 from .filesystem import FileSafetyError, normalize_root, probe_capabilities, resolve_inside
-from .processors import create_default_registry
+from .processors import ProcessingContext, create_default_registry
 from .schemas import (
     AuditRead,
     BackupRead,
@@ -49,6 +49,8 @@ from .schemas import (
     ReviewDecisionUpsert,
     ReviewItemRead,
     RollbackPreview,
+    RuleTestInput,
+    RuleTestResult,
     ScanCreate,
     ScanRead,
     ScheduleCreate,
@@ -58,12 +60,18 @@ from .schemas import (
     SourceRead,
     SourceUpdate,
     StageResultRead,
+    TemplateImportInput,
+    TemplateTextInput,
+    TemplateValidationResult,
     WorkflowCompare,
     WorkflowCreate,
+    WorkflowImpactSummary,
     WorkflowPortable,
     WorkflowRead,
     WorkflowRevisionCreate,
     WorkflowRevisionRead,
+    WorkflowStage,
+    WorkflowTemplateV2,
 )
 from .services import (
     DEFAULT_PROCESSORS,
@@ -79,6 +87,15 @@ from .services import (
     run_pipeline,
 )
 from .workers import WorkerService
+from .workflow_engine import run_template_entry
+from .workflow_templates import (
+    builtin_templates,
+    dump_template,
+    parse_template_text,
+    processors_from_template,
+    template_from_revision,
+    validate_template,
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -152,6 +169,104 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/processors")
     def processors() -> list[dict[str, Any]]:
         return [manifest.__dict__ for manifest in registry.manifests()]
+
+    @app.get("/api/workflow-templates", response_model=list[WorkflowTemplateV2])
+    def list_builtin_templates():
+        return builtin_templates()
+
+    @app.post("/api/workflow-templates/validate", response_model=TemplateValidationResult)
+    def validate_workflow_template(payload: TemplateTextInput):
+        try:
+            value = parse_template_text(payload.content, payload.format)
+        except ValueError as exc:
+            return TemplateValidationResult(valid=False, errors=[str(exc)])
+        return validate_template(value, registry, settings.version)
+
+    @app.post("/api/workflow-templates/import", response_model=WorkflowRead, status_code=201)
+    def import_workflow_template(
+        payload: TemplateImportInput, session: Session = Depends(session_dependency)
+    ):
+        try:
+            value = parse_template_text(payload.content, payload.format)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        validation = validate_template(value, registry, settings.version)
+        if not validation.valid or not validation.template:
+            raise HTTPException(422, detail={"code": "template.invalid", "errors": validation.errors})
+        template = validation.template
+        workflow = Workflow(
+            name=template.name,
+            preset=template.preset,
+            review_policy=template.review_policy,
+        )
+        session.add(workflow)
+        session.flush()
+        processors = processors_from_template(template)
+        session.add(
+            WorkflowRevision(
+                workflow_id=workflow.id,
+                revision=1,
+                config={
+                    "template": template.model_dump(mode="json"),
+                    "processors": [item.model_dump() for item in processors],
+                },
+            )
+        )
+        session.commit()
+        return workflow
+
+    @app.get("/api/workflow-templates/{workflow_id}/export", response_class=PlainTextResponse)
+    def export_workflow_template(
+        workflow_id: str,
+        format: str = Query("yaml", pattern="^(yaml|json)$"),
+        session: Session = Depends(session_dependency),
+    ):
+        workflow = require(Workflow, workflow_id, session)
+        revision = session.query(WorkflowRevision).filter_by(
+            workflow_id=workflow.id, revision=workflow.current_revision
+        ).one()
+        template = template_from_revision(
+            workflow.name, workflow.preset, workflow.review_policy, revision.config
+        )
+        return PlainTextResponse(
+            dump_template(template, format),
+            media_type="application/json" if format == "json" else "application/yaml",
+        )
+
+    @app.post(
+        "/api/workflow-templates/{workflow_id}/test-rule", response_model=RuleTestResult
+    )
+    def test_workflow_rule(
+        workflow_id: str,
+        payload: RuleTestInput,
+        session: Session = Depends(session_dependency),
+    ):
+        require(Workflow, workflow_id, session)
+        path = Path(payload.relative_path)
+        context = ProcessingContext(
+            entry_id="test",
+            relative_path=payload.relative_path,
+            original_name=path.name,
+            parent_path=path.parent.as_posix() if path.parent != Path(".") else "",
+            extension=path.suffix.lower(),
+            size=payload.size,
+            mtime_ns=payload.mtime_ns,
+        )
+        template = WorkflowTemplateV2(
+            name="Rule test",
+            stages=[
+                WorkflowStage(id="clean", rules=[payload.rule])
+            ],
+        )
+        trace = run_template_entry(template, context, registry)[0]
+        return {
+            "matched": trace.status != "skipped",
+            "status": trace.status,
+            "input": trace.input_data,
+            "output": trace.output_data,
+            "reasons": trace.reasons,
+            "warnings": trace.warnings,
+        }
 
     @app.post("/api/sources", response_model=SourceRead, status_code=201)
     def create_source(payload: SourceCreate, session: Session = Depends(session_dependency)):
@@ -421,6 +536,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "removed": sorted(before_ids - after_ids),
             "changed": sorted(identifier for identifier in shared if before[identifier] != after[identifier]),
             "unchanged": sorted(identifier for identifier in shared if before[identifier] == after[identifier]),
+        }
+
+    @app.post("/api/workflows/{workflow_id}/impact", response_model=WorkflowImpactSummary)
+    def workflow_impact(
+        workflow_id: str,
+        source_id: str,
+        session: Session = Depends(session_dependency),
+    ):
+        workflow = require(Workflow, workflow_id, session)
+        source = require(Source, source_id, session)
+        run = run_pipeline(session, source, workflow, registry)
+        plan = create_plan_from_pipeline(session, run)
+        kinds = [operation.kind for operation in plan.operations]
+        archive = 0
+        for operation in plan.operations:
+            if any(reason == "action.archive" for reason in operation.reasons):
+                archive += 1
+        total = int(run.summary.get("files", 0))
+        conflicts = 0
+        try:
+            preflight_plan(session, plan)
+        except (DomainError, FileSafetyError):
+            conflicts = 1
+        return {
+            "workflow_id": workflow_id,
+            "source_id": source_id,
+            "total": total,
+            "rename": kinds.count("rename"),
+            "move": kinds.count("move") - archive,
+            "archive": archive,
+            "quarantine": kinds.count("quarantine"),
+            "unchanged": max(0, total - len(plan.operations)),
+            "conflicts": conflicts,
+            "review": int(plan.summary.get("unresolved_review_count", 0)),
         }
 
     @app.post("/api/workflows/{workflow_id}/revisions", response_model=WorkflowRead)
