@@ -8,4 +8,4 @@ Protected sidecars currently include `.srt`, `.ass`, `.ssa`, and `.nfo`. Generic
 
 The built-in pack is available from `GET /api/junk-rule-packs`. Use `POST /api/junk-rule-packs/validate` to validate a custom JSON pack. The desktop **Junk rules** page shows every built-in rule and exposes the validation editor.
 
-The current phase reads indexed metadata only. Repeated-hash evidence and opt-in inspection of small text/link files are planned extensions and will reuse the same evidence model.
+Content-hash scans add evidence when the same small file occurs in at least three distinct directories. The opt-in small-text scan reads at most 128 KB from `.txt`, `.url`, `.website`, `.html`, and `.htm` files. It stores only `url`, `promotion`, and `contact` signal names; it never stores the inspected text. Both modes are disabled during a standard metadata scan.

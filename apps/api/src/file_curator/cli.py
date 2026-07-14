@@ -20,7 +20,7 @@ def detect_unstamped_revision(database_url: str) -> str | None:
             return None
         scan_columns = {column["name"] for column in inspector.get_columns("scan_jobs")}
         if "review_decisions" in tables and "hash_contents" in scan_columns:
-            return "0003_scan_content_hash"
+            return "0004_junk_scan_signals"
         if "review_decisions" in tables:
             return "0002_review_decisions"
         return "0001_initial"

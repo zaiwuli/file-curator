@@ -92,6 +92,25 @@ def evaluate_junk(context: ProcessingContext, pack: JunkRulePack) -> JunkEvaluat
         if protected:
             continue
         evidence.append(JunkEvidence(rule.id, rule.action, rule.score, f"junk.{rule.id}", matched_value))
+    text_signals = context.fields.get("text_signals", [])
+    if not protected and text_signals:
+        evidence.append(JunkEvidence(
+            "text.signal",
+            "quarantine" if "promotion" in text_signals else "review",
+            55 if "promotion" in text_signals else 35,
+            "junk.text.signal",
+            ",".join(text_signals),
+        ))
+    duplicate_count = int(context.fields.get("hash_duplicate_count", 0))
+    directory_count = int(context.fields.get("hash_directory_count", 0))
+    if not protected and context.size <= 1_000_000 and duplicate_count >= 3 and directory_count >= 3:
+        evidence.append(JunkEvidence(
+            "repeated.hash",
+            "quarantine",
+            60,
+            "junk.repeated.hash",
+            f"{duplicate_count}:{directory_count}",
+        ))
     score = min(100, sum(item.score for item in evidence))
     if any(item.action == "quarantine" for item in evidence) and score >= 50:
         action: JunkAction = "quarantine"

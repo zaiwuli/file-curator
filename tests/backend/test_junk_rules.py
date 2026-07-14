@@ -115,3 +115,78 @@ def test_builtin_bt_template_creates_explainable_quarantine_review(
     assert reviews[0]["relative_path"] == "扫码关注_更多资源.url"
     assert "junk.link.file" in reviews[0]["reasons"]
     assert "junk.ad.keyword" in reviews[0]["reasons"]
+
+
+def test_repeated_hash_across_directories_is_quarantine_evidence() -> None:
+    context = item("poster.jpg", size=5000)
+    context.fields.update({"hash_duplicate_count": 4, "hash_directory_count": 4})
+    result = evaluate_junk(context, DEFAULT_JUNK_PACK)
+    assert result.action == "quarantine"
+    assert "repeated.hash" in {evidence.rule_id for evidence in result.evidence}
+
+
+def test_small_text_scan_stores_signals_without_content(client: TestClient, media_root: Path) -> None:
+    content = "更多资源请访问 https://example.com 并关注推广频道"
+    (media_root / "说明.txt").write_text(content, encoding="utf-8")
+    source = client.post(
+        "/api/sources", json={"name": "Text fixture", "root_path": str(media_root)}
+    ).json()
+    scan = client.post(
+        "/api/scans",
+        json={
+            "source_id": source["id"],
+            "hash_contents": False,
+            "inspect_small_text": True,
+        },
+    ).json()
+    for _ in range(100):
+        current = client.get(f"/api/scans/{scan['id']}").json()
+        if current["status"] == "completed":
+            break
+        __import__("time").sleep(0.02)
+    with client.app.state.database.session_factory() as session:
+        from file_curator.db import FileEntry
+
+        entry = session.query(FileEntry).filter_by(source_id=source["id"], is_dir=False).one()
+        assert set(entry.text_signals) == {"url", "promotion"}
+        assert content not in str(entry.text_signals)
+
+
+def test_builtin_template_uses_repeated_hash_evidence(
+    client: TestClient, media_root: Path
+) -> None:
+    payload = b"same promotion image"
+    for folder in ("torrent-a", "torrent-b", "torrent-c"):
+        directory = media_root / folder
+        directory.mkdir()
+        (directory / "banner.jpg").write_bytes(payload)
+    source = client.post(
+        "/api/sources", json={"name": "Hash fixture", "root_path": str(media_root)}
+    ).json()
+    scan = client.post(
+        "/api/scans", json={"source_id": source["id"], "hash_contents": True}
+    ).json()
+    for _ in range(100):
+        current = client.get(f"/api/scans/{scan['id']}").json()
+        if current["status"] == "completed":
+            break
+        __import__("time").sleep(0.02)
+    template = next(
+        item
+        for item in client.get("/api/workflow-templates").json()
+        if item["name"] == "Ads and temporary file quarantine"
+    )
+    workflow = client.post(
+        "/api/workflow-templates/import",
+        json={
+            "content": dump_template(WorkflowTemplateV2.model_validate(template), "json"),
+            "format": "json",
+        },
+    ).json()
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source["id"], "workflow_id": workflow["id"]},
+    ).json()
+    reviews = client.get("/api/reviews", params={"run_id": run["id"]}).json()
+    assert len(reviews) == 3
+    assert all("junk.repeated.hash" in item["reasons"] for item in reviews)

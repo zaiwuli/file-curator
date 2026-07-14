@@ -65,6 +65,7 @@ class ScanJob(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), default="queued")
     mode: Mapped[str] = mapped_column(String(16), default="full")
     hash_contents: Mapped[bool] = mapped_column(Boolean, default=False)
+    inspect_small_text: Mapped[bool] = mapped_column(Boolean, default=False)
     scanned_count: Mapped[int] = mapped_column(Integer, default=0)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     cursor: Mapped[str | None] = mapped_column(Text)
@@ -87,6 +88,7 @@ class FileEntry(Base, TimestampMixin):
     scan_job_id: Mapped[str] = mapped_column(ForeignKey("scan_jobs.id", ondelete="CASCADE"))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     content_hash: Mapped[str | None] = mapped_column(String(128))
+    text_signals: Mapped[list[str]] = mapped_column(JSON, default=list)
 
 
 class FileGroup(Base, TimestampMixin):

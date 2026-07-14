@@ -114,6 +114,10 @@ def run_pipeline(
     entries = (
         session.query(FileEntry).filter_by(source_id=source.id, active=True, is_dir=False).all()
     )
+    hash_groups: dict[str, list[FileEntry]] = {}
+    for entry in entries:
+        if entry.content_hash:
+            hash_groups.setdefault(entry.content_hash, []).append(entry)
     changed = review = 0
     for entry in entries:
         context = ProcessingContext(
@@ -124,6 +128,14 @@ def run_pipeline(
             extension=entry.extension,
             size=entry.size,
             mtime_ns=entry.mtime_ns,
+            fields={
+                "text_signals": entry.text_signals,
+                "hash_duplicate_count": len(hash_groups.get(entry.content_hash or "", [])),
+                "hash_directory_count": len({
+                    item.parent_path
+                    for item in hash_groups.get(entry.content_hash or "", [])
+                }),
+            },
         )
         if template:
             traces = run_template_entry(template, context, registry)

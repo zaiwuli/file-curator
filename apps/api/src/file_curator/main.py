@@ -387,6 +387,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_id=source.id,
             mode=payload.mode,
             hash_contents=payload.hash_contents,
+            inspect_small_text=payload.inspect_small_text,
             status="queued",
         )
         session.add(job)

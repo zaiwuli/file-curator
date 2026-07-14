@@ -39,6 +39,7 @@ class ScanCreate(BaseModel):
     source_id: str
     mode: Literal["full", "incremental"] = "full"
     hash_contents: bool = False
+    inspect_small_text: bool = False
 
 
 class ScanRead(ORMModel):
@@ -47,6 +48,7 @@ class ScanRead(ORMModel):
     status: str
     mode: str
     hash_contents: bool
+    inspect_small_text: bool
     scanned_count: int
     error_count: int
     cursor: str | None

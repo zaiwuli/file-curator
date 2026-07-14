@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -106,6 +107,25 @@ def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+TEXT_INSPECTION_EXTENSIONS = {".txt", ".url", ".website", ".html", ".htm"}
+TEXT_INSPECTION_LIMIT = 128 * 1024
+TEXT_SIGNAL_PATTERNS = {
+    "url": re.compile(r"(?i)https?://|www\."),
+    "promotion": re.compile(r"(?i)广告|推广|更多资源|最新网址|扫码|关注|promo|download more"),
+    "contact": re.compile(r"(?i)(?:qq|telegram|wechat|vx|群)[\s:：_-]*[a-z0-9_-]{4,}"),
+}
+
+
+def inspect_small_text(path: Path, size: int) -> list[str]:
+    if path.suffix.casefold() not in TEXT_INSPECTION_EXTENSIONS or size > TEXT_INSPECTION_LIMIT:
+        return []
+    data = path.read_bytes()[:TEXT_INSPECTION_LIMIT]
+    text = data.decode("utf-8", errors="ignore")
+    if not text:
+        text = data.decode("gb18030", errors="ignore")
+    return [name for name, pattern in TEXT_SIGNAL_PATTERNS.items() if pattern.search(text)]
+
+
 def scan_source(
     session: Any,
     source: Source,
@@ -139,12 +159,22 @@ def scan_source(
                     data["content_hash"] = hash_file(root / data["relative_path"])
                 elif content_changed:
                     existing.content_hash = None
+                if job.inspect_small_text and not data["is_dir"]:
+                    data["text_signals"] = inspect_small_text(
+                        root / data["relative_path"], data["size"]
+                    )
+                elif content_changed:
+                    existing.text_signals = []
                 for key, value in data.items():
                     setattr(existing, key, value)
                 existing.scan_job_id = job.id
             else:
                 if job.hash_contents and not data["is_dir"]:
                     data["content_hash"] = hash_file(root / data["relative_path"])
+                if job.inspect_small_text and not data["is_dir"]:
+                    data["text_signals"] = inspect_small_text(
+                        root / data["relative_path"], data["size"]
+                    )
                 session.add(FileEntry(source_id=source.id, scan_job_id=job.id, **data))
             job.scanned_count += 1
             job.cursor = data["relative_path"]
