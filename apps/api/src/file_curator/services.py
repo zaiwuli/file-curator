@@ -197,7 +197,10 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
         session.query(StageResult).filter_by(run_id=run.id).order_by(StageResult.created_at).all()
     )
     for result in results:
-        latest[result.file_entry_id] = result
+        # A condition-miss trace is informational and must not erase the last
+        # matched action's proposed name, target, or operation kind.
+        if result.status != "skipped" or result.file_entry_id not in latest:
+            latest[result.file_entry_id] = result
         if result.status in {"review", "warning"}:
             review_required.add(result.file_entry_id)
     decisions = {

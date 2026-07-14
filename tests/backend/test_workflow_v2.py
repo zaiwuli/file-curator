@@ -231,3 +231,26 @@ def test_workflow_update_invalidates_draft_plans(client: TestClient, media_root:
     assert response.status_code == 200
     plans = client.get("/api/plans").json()
     assert next(item for item in plans if item["id"] == plan["id"])["status"] == "invalidated"
+
+
+def test_unmatched_later_rule_does_not_erase_prior_action(
+    client: TestClient, media_root: Path
+) -> None:
+    (media_root / "episode_2026-01-05.mp4").write_text("media")
+    source_id = scan_source(client, media_root)
+    template = template_with(
+        ("clean", RuleCard(
+            id="rename",
+            name="Rename",
+            actions=[WorkflowAction(kind="render_name", options={"name_template": "renamed.mp4"})],
+        )),
+        ("target", RuleCard(
+            id="only-tmp",
+            name="Only temporary files",
+            conditions=ConditionGroup(conditions=[Condition(field="extension", operator="equals", value=".tmp")]),
+            actions=[WorkflowAction(kind="quarantine")],
+        )),
+    )
+    values = import_and_run(client, source_id, template)
+    plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
+    assert plan["operations"][0]["target_relative_path"] == "renamed.mp4"
