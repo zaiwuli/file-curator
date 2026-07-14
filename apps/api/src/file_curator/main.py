@@ -69,11 +69,14 @@ from .schemas import (
     TemplateValidationResult,
     WorkflowCompare,
     WorkflowCreate,
+    WorkflowDiagnosticsResult,
     WorkflowImpactSummary,
     WorkflowPortable,
     WorkflowRead,
     WorkflowRevisionCreate,
     WorkflowRevisionRead,
+    WorkflowSimulationInput,
+    WorkflowSimulationResult,
     WorkflowStage,
     WorkflowTemplateUpdate,
     WorkflowTemplateV2,
@@ -92,6 +95,7 @@ from .services import (
     run_pipeline,
 )
 from .workers import WorkerService
+from .workflow_diagnostics import diagnose_workflow
 from .workflow_engine import run_template_entry
 from .workflow_templates import (
     builtin_templates,
@@ -331,6 +335,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "output": trace.output_data,
             "reasons": trace.reasons,
             "warnings": trace.warnings,
+        }
+
+    @app.post(
+        "/api/workflow-templates/simulate", response_model=WorkflowSimulationResult
+    )
+    def simulate_workflow(payload: WorkflowSimulationInput):
+        path = Path(payload.relative_path)
+        context = ProcessingContext(
+            entry_id="simulation",
+            relative_path=payload.relative_path,
+            original_name=path.name,
+            parent_path=path.parent.as_posix() if path.parent != Path(".") else "",
+            extension=path.suffix.lower(),
+            size=payload.size,
+            mtime_ns=payload.mtime_ns,
+            fields=dict(payload.fields),
+        )
+        steps = run_template_entry(payload.template, context, registry)
+        name = context.proposed_name or context.original_name
+        parent = context.proposed_parent
+        if parent is None:
+            parent = context.parent_path
+        proposed_path = (Path(parent) / name).as_posix() if parent else name
+        operation_kind = context.fields.get("operation_kind")
+        if operation_kind == "quarantine":
+            action = "quarantine"
+        elif proposed_path == payload.relative_path:
+            action = "unchanged"
+        elif parent == context.parent_path:
+            action = "rename"
+        elif operation_kind == "archive":
+            action = "archive"
+        else:
+            action = "move"
+        return {
+            "original_path": payload.relative_path,
+            "proposed_path": proposed_path,
+            "action": action,
+            "requires_review": any(step.status in {"review", "warning"} for step in steps),
+            "fields": context.fields,
+            "steps": [
+                {
+                    "rule_id": step.rule_id,
+                    "status": step.status,
+                    "input": step.input_data,
+                    "output": step.output_data,
+                    "reasons": step.reasons,
+                    "warnings": step.warnings,
+                }
+                for step in steps
+            ],
+        }
+
+    @app.post(
+        "/api/workflow-templates/diagnostics", response_model=WorkflowDiagnosticsResult
+    )
+    def workflow_diagnostics(payload: WorkflowTemplateV2):
+        diagnostics = diagnose_workflow(payload)
+        errors = sum(item["severity"] == "error" for item in diagnostics)
+        warnings = sum(item["severity"] == "warning" for item in diagnostics)
+        return {
+            "valid": errors == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "diagnostics": diagnostics,
         }
 
     @app.post("/api/sources", response_model=SourceRead, status_code=201)

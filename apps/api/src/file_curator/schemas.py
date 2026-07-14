@@ -218,6 +218,48 @@ class RuleTestResult(BaseModel):
     warnings: list[str]
 
 
+class WorkflowSimulationInput(BaseModel):
+    template: WorkflowTemplateV2
+    relative_path: str
+    size: int = Field(default=0, ge=0)
+    mtime_ns: int = Field(default=0, ge=0)
+    fields: dict[str, Any] = {}
+
+
+class WorkflowSimulationStep(BaseModel):
+    rule_id: str
+    status: str
+    input: dict[str, Any]
+    output: dict[str, Any]
+    reasons: list[str]
+    warnings: list[str]
+
+
+class WorkflowSimulationResult(BaseModel):
+    original_path: str
+    proposed_path: str
+    action: str
+    requires_review: bool
+    fields: dict[str, Any]
+    steps: list[WorkflowSimulationStep]
+
+
+class WorkflowDiagnostic(BaseModel):
+    severity: Literal["error", "warning", "info"]
+    code: str
+    stage_id: str | None = None
+    rule_id: str | None = None
+    message: str
+    suggestion: str
+
+
+class WorkflowDiagnosticsResult(BaseModel):
+    valid: bool
+    errors: int
+    warnings: int
+    diagnostics: list[WorkflowDiagnostic]
+
+
 class WorkflowImpactSummary(BaseModel):
     workflow_id: str
     source_id: str

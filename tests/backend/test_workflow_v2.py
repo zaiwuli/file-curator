@@ -254,3 +254,39 @@ def test_unmatched_later_rule_does_not_erase_prior_action(
     values = import_and_run(client, source_id, template)
     plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
     assert plan["operations"][0]["target_relative_path"] == "renamed.mp4"
+
+
+def test_full_workflow_simulation_returns_step_by_step_archive(client: TestClient) -> None:
+    template = template_with(
+        ("extract", RuleCard(id="dates", name="Dates", actions=[WorkflowAction(kind="extract_dates")])),
+        ("clean", RuleCard(id="clean", name="Clean", actions=[WorkflowAction(kind="clean_name", options={"remove_words": ["AD"], "prepend_dates": True})])),
+        ("target", RuleCard(id="archive", name="Archive", actions=[WorkflowAction(kind="archive", options={"path_template": "{year}/{month}"})])),
+    )
+    response = client.post("/api/workflow-templates/simulate", json={
+        "template": template.model_dump(mode="json"),
+        "relative_path": "parent/AD_movie_2026.1.5.mp4",
+        "size": 100,
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["action"] == "archive"
+    assert result["proposed_path"] == "2026/01/2026-01-05 movie.mp4"
+    assert [step["rule_id"] for step in result["steps"]] == ["dates", "clean", "archive"]
+
+
+def test_workflow_diagnostics_find_missing_dependencies(client: TestClient) -> None:
+    template = template_with(
+        ("clean", RuleCard(id="numbers", name="Numbers", actions=[WorkflowAction(kind="remove_number_patterns", options={"patterns": [r"\d{6}"]})])),
+        ("target", RuleCard(id="archive", name="Archive", actions=[WorkflowAction(kind="archive", options={"path_template": "{year}/{month}"})])),
+        ("target", RuleCard(id="quarantine", name="Quarantine", order=1, actions=[WorkflowAction(kind="quarantine")])),
+    )
+    response = client.post(
+        "/api/workflow-templates/diagnostics", json=template.model_dump(mode="json")
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["valid"] is False
+    codes = {item["code"] for item in result["diagnostics"]}
+    assert "workflow.archive_missing_date" in codes
+    assert "workflow.quarantine_without_review" in codes
+    assert "workflow.numbers_unprotected" in codes

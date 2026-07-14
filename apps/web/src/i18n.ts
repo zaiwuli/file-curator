@@ -39,6 +39,8 @@ const zh: Record<string,string> = {
   'Normalize names without moving files.':'规范名称但不移动文件。','Archive by year and month':'按年月归档','Extract dates and archive within the source.':'提取日期并在当前数据源内归档。','Inherit parent folder':'继承父目录名称','Prefix names with the direct parent folder.':'将直属父目录名称加到文件名前。','Image date archive':'图片按日期归档','Archive dated images by year and month.':'将含日期的图片按年月归档。','Media organization':'影视和关联文件整理','Extract metadata and organize known media types.':'提取信息并整理常见媒体文件。','Classify and organize common media and sidecar files.':'分类整理常见媒体及关联字幕文件。','Downloads cleanup':'下载目录清理','Clean download names and review incomplete files.':'清理下载名称并审核未完成文件。','Ads and temporary file quarantine':'广告与临时文件隔离','Quarantine configured junk candidates for review.':'将匹配的垃圾候选隔离并审核。','Duplicate file review':'重复文件审核','Send duplicate candidates to review.':'将重复候选送入审核。','Send indexed duplicate candidates to review.':'将索引出的重复候选送入审核。',
   'Junk rules':'垃圾规则','JUNK RULE LIBRARY':'垃圾规则库','RULE PACKS':'规则包','junk.rules_load_failed':'垃圾规则加载失败','junk.rules_invalid_json':'规则 JSON 无效',
   'Inspect small text':'检查小文本','Small text inspection':'小文本检查','Small text inspection scan queued for':'小文本检查已加入队列：',
+  'Simulate full workflow':'模拟完整工作流','Final action':'最终动作','Review required':'需要审核','processing steps':'个处理步骤','Workflow diagnostics':'工作流诊断','errors':'个错误','warnings':'个警告',
+  'Quick rule cards':'快捷规则卡','Insert common business rules, then adjust their options.':'插入常用业务规则，然后按需要调整参数。','Extract and prepend all dates':'提取并前置全部日期','Remove advertisement words':'删除广告词','Inherit parent folder name':'继承父目录名称','Archive by earliest year and month':'按最早日期年月归档','Detect and quarantine BT advertisements':'检测并隔离 BT 广告',
 }
 
 export const messages = {

@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCompare, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowTemplateV2 } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCompare, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -35,6 +35,8 @@ export const api = {
   exportTemplate: async (id: string, format: 'yaml'|'json') => { const response=await fetch(`${apiBase}/workflow-templates/${id}/export?format=${format}`); if(!response.ok)throw new Error(`template.export_http_${response.status}`); return response.text() },
   testRule: (id: string, rule: RuleCard, relative_path: string) => post<{matched:boolean;status:string;input:Record<string,unknown>;output:Record<string,unknown>;reasons:string[];warnings:string[]}>(`/workflow-templates/${id}/test-rule`, { rule, relative_path }),
   workflowImpact: (id: string, sourceId: string) => post<WorkflowImpact>(`/workflows/${id}/impact?source_id=${encodeURIComponent(sourceId)}`),
+  simulateWorkflow: (template: WorkflowTemplateV2, relative_path: string, size = 0) => post<WorkflowSimulation>('/workflow-templates/simulate', { template, relative_path, size, fields: {} }),
+  diagnoseWorkflow: (template: WorkflowTemplateV2) => post<WorkflowDiagnostics>('/workflow-templates/diagnostics', template),
   pipelineRuns: () => request<PipelineRun[]>('/pipeline-runs'),
   reviews: (runId?: string) => request<ReviewItem[]>(`/reviews${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`),
   plans: () => request<PlanSummary[]>('/plans'),
