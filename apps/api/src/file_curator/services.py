@@ -2,6 +2,7 @@ import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -46,6 +47,38 @@ DEFAULT_PROCESSORS = [
     ProcessorConfig(id="classify_extension"),
     ProcessorConfig(id="normalize_name"),
 ]
+
+
+def _entry_in_scope(entry: FileEntry, scope: Any) -> bool:
+    path = Path(entry.relative_path)
+    parts = path.parts
+    extension = entry.extension.casefold()
+    if not scope.include_subdirectories and len(parts) > 1:
+        return False
+    if scope.max_depth is not None and len(parts) - 1 > scope.max_depth:
+        return False
+    if scope.include_extensions and extension not in {value.casefold() for value in scope.include_extensions}:
+        return False
+    if extension in {value.casefold() for value in scope.exclude_extensions}:
+        return False
+    relative = entry.relative_path.casefold()
+    if scope.include_paths and not any(value.casefold() in relative for value in scope.include_paths):
+        return False
+    if any(value.casefold() in relative for value in scope.exclude_paths):
+        return False
+    if scope.ignore_hidden and any(part.startswith(".") for part in parts):
+        return False
+    if scope.ignore_system_paths and any(part.casefold() in {"$recycle.bin", "system volume information"} for part in parts):
+        return False
+    if scope.min_size is not None and entry.size < scope.min_size:
+        return False
+    if scope.max_size is not None and entry.size > scope.max_size:
+        return False
+    if scope.modified_after_ns is not None and entry.mtime_ns < scope.modified_after_ns:
+        return False
+    if scope.modified_before_ns is not None and entry.mtime_ns > scope.modified_before_ns:
+        return False
+    return True
 
 
 def rebuild_file_groups(session: Session, source_id: str, entries: list[FileEntry]) -> int:
@@ -114,6 +147,8 @@ def run_pipeline(
     entries = (
         session.query(FileEntry).filter_by(source_id=source.id, active=True, is_dir=False).all()
     )
+    if template:
+        entries = [entry for entry in entries if _entry_in_scope(entry, template.scope)]
     hash_groups: dict[str, list[FileEntry]] = {}
     for entry in entries:
         if entry.content_hash:
@@ -321,6 +356,41 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
             )
         )
         sequence += 1
+    if workflow and "template" in get_revision(session, workflow).config:
+        policy = get_revision(session, workflow).config["template"].get("association_policy", {})
+        if policy.get("enabled", True):
+            allowed = {str(value).casefold() for value in policy.get("extensions", [])}
+            existing_sources = {operation.source_relative_path for operation in plan.operations}
+            associated: list[Operation] = []
+            for operation in list(plan.operations):
+                if operation.kind not in {"rename", "move"} or Path(operation.source_relative_path).suffix.casefold() in allowed:
+                    continue
+                main_entry = session.query(FileEntry).filter_by(
+                    source_id=run.source_id, relative_path=operation.source_relative_path
+                ).one_or_none()
+                if not main_entry:
+                    continue
+                main_stem = Path(main_entry.name).stem.casefold()
+                target_path = Path(operation.target_relative_path)
+                for sidecar in entries_for_source(session, run.source_id, main_entry.parent_path):
+                    if sidecar.relative_path in existing_sources or sidecar.id == main_entry.id:
+                        continue
+                    if sidecar.extension.casefold() not in allowed or not Path(sidecar.name).stem.casefold().startswith(main_stem):
+                        continue
+                    suffix = Path(sidecar.name).stem[len(main_stem):]
+                    side_target = (target_path.parent / f"{target_path.stem}{suffix}{Path(sidecar.name).suffix}").as_posix()
+                    associated.append(Operation(
+                        sequence=sequence + len(associated),
+                        kind=operation.kind,
+                        source_relative_path=sidecar.relative_path,
+                        target_relative_path=side_target,
+                        expected_size=sidecar.size,
+                        expected_mtime_ns=sidecar.mtime_ns,
+                        reasons=["association.same_stem", *operation.reasons],
+                    ))
+                    existing_sources.add(sidecar.relative_path)
+            plan.operations.extend(associated)
+            sequence += len(associated)
     plan.summary = {
         "operation_count": len(plan.operations),
         "unresolved_review_count": unresolved,
@@ -330,6 +400,12 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
     }
     session.commit()
     return plan
+
+
+def entries_for_source(session: Session, source_id: str, parent_path: str) -> list[FileEntry]:
+    return session.query(FileEntry).filter_by(
+        source_id=source_id, parent_path=parent_path, active=True, is_dir=False
+    ).all()
 
 
 def create_manual_plan(session: Session, payload: ManualPlanCreate) -> Plan:
@@ -403,6 +479,20 @@ def freeze_plan(session: Session, plan: Plan) -> Plan:
     if plan.status != "draft":
         raise DomainError("plan.not_draft")
     preflight_plan(session, plan)
+    run = session.get(PipelineRun, plan.run_id)
+    workflow = session.get(Workflow, run.workflow_id) if run else None
+    if workflow:
+        revision = get_revision(session, workflow)
+        template_data = revision.config.get("template", {})
+        threshold = template_data.get("impact_threshold", {})
+        operation_count = len(plan.operations)
+        quarantine_count = sum(operation.kind == "quarantine" for operation in plan.operations)
+        if threshold.get("max_operations") is not None and operation_count > threshold["max_operations"]:
+            raise DomainError("plan.impact_threshold_operations")
+        if threshold.get("max_quarantine") is not None and quarantine_count > threshold["max_quarantine"]:
+            raise DomainError("plan.impact_threshold_quarantine")
+        if threshold.get("review_above_operations") is not None and operation_count > threshold["review_above_operations"] and int(plan.summary.get("unresolved_review_count", 0)) > 0:
+            raise DomainError("plan.impact_threshold_review")
     plan.status = "frozen"
     plan.frozen_at = utcnow()
     session.commit()

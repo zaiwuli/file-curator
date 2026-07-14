@@ -69,6 +69,7 @@ from .schemas import (
     TemplateValidationResult,
     WorkflowCompare,
     WorkflowCreate,
+    WorkflowDependency,
     WorkflowDiagnosticsResult,
     WorkflowImpactSummary,
     WorkflowPortable,
@@ -89,6 +90,7 @@ from .services import (
     create_manual_plan,
     create_plan_from_pipeline,
     freeze_plan,
+    get_revision,
     preflight_plan,
     queue_plan_execution,
     rollback_batch,
@@ -401,6 +403,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "warnings": warnings,
             "diagnostics": diagnostics,
         }
+
+    @app.get("/api/workflows/{workflow_id}/dependencies", response_model=list[WorkflowDependency])
+    def workflow_dependencies(workflow_id: str, session: Session = Depends(session_dependency)):
+        workflow = require(Workflow, workflow_id, session)
+        template = template_from_revision(workflow.name, workflow.preset, workflow.review_policy, get_revision(session, workflow).config)
+        actions = {action.kind for stage in template.stages for rule in stage.rules if rule.enabled for action in rule.actions}
+        dependencies = [
+            {"feature": "archive_by_date", "requires": ["extract_dates"], "satisfied": "extract_dates" in actions, "message": "Date archive needs multi-date extraction."},
+            {"feature": "render_dates", "requires": ["extract_dates"], "satisfied": "extract_dates" in actions, "message": "Name templates using dates need date extraction."},
+            {"feature": "number_cleanup", "requires": ["extract_dates", "extract_identifier", "extract_sequence"], "satisfied": any(value in actions for value in ("extract_dates", "extract_identifier", "extract_sequence")), "message": "Number cleanup needs protected metadata first."},
+            {"feature": "hash_duplicate_detection", "requires": ["hash_contents_scan"], "satisfied": False, "message": "Run a hash scan before repeated-file evidence is available."},
+            {"feature": "small_text_detection", "requires": ["inspect_small_text_scan"], "satisfied": False, "message": "Enable small-text inspection before text signals are available."},
+        ]
+        return dependencies
 
     @app.post("/api/sources", response_model=SourceRead, status_code=201)
     def create_source(payload: SourceCreate, session: Session = Depends(session_dependency)):

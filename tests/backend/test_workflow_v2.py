@@ -290,3 +290,50 @@ def test_workflow_diagnostics_find_missing_dependencies(client: TestClient) -> N
     assert "workflow.archive_missing_date" in codes
     assert "workflow.quarantine_without_review" in codes
     assert "workflow.numbers_unprotected" in codes
+
+
+def test_workflow_scope_filters_nested_and_extensions(client: TestClient, media_root: Path) -> None:
+    (media_root / "top.mp4").write_text("top")
+    nested = media_root / "nested"
+    nested.mkdir()
+    (nested / "inside.mp4").write_text("inside")
+    (nested / "inside.txt").write_text("text")
+    source_id = scan_source(client, media_root)
+    template = template_with(("clean", RuleCard(
+        id="rename", name="Rename", actions=[WorkflowAction(kind="render_name", options={"name_template": "changed.mp4"})]
+    )))
+    template.scope.include_subdirectories = False
+    template.scope.include_extensions = [".mp4"]
+    values = import_and_run(client, source_id, template)
+    assert values["run"]["summary"]["files"] == 1
+
+
+def test_workflow_dependencies_and_impact_threshold(client: TestClient, media_root: Path) -> None:
+    (media_root / "one.mp4").write_text("one")
+    source_id = scan_source(client, media_root)
+    template = template_with(("clean", RuleCard(
+        id="rename", name="Rename", actions=[WorkflowAction(kind="render_name", options={"name_template": "changed.mp4"})]
+    )))
+    template.impact_threshold.max_operations = 1
+    values = import_and_run(client, source_id, template)
+    deps = client.get(f"/api/workflows/{values['workflow']['id']}/dependencies")
+    assert deps.status_code == 200
+    assert any(item["feature"] == "render_dates" and not item["satisfied"] for item in deps.json())
+    plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
+    assert client.post(f"/api/plans/{plan['id']}/freeze").json()["status"] == "frozen"
+
+
+def test_associated_sidecar_follows_main_file(client: TestClient, media_root: Path) -> None:
+    (media_root / "movie_2026-01-05.mp4").write_text("movie")
+    (media_root / "movie_2026-01-05.srt").write_text("subtitle")
+    source_id = scan_source(client, media_root)
+    template = template_with(("clean", RuleCard(
+        id="rename", name="Rename",
+        conditions=ConditionGroup(conditions=[Condition(field="extension", operator="equals", value=".mp4")]),
+        actions=[WorkflowAction(kind="render_name", options={"name_template": "renamed.mp4"})]
+    )))
+    values = import_and_run(client, source_id, template)
+    plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
+    targets = {item["target_relative_path"] for item in plan["operations"]}
+    assert "renamed.mp4" in targets
+    assert "renamed.srt" in targets

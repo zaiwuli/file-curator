@@ -165,6 +165,41 @@ class WorkflowStage(BaseModel):
     rules: list[RuleCard] = []
 
 
+class WorkflowScopeConfig(BaseModel):
+    include_subdirectories: bool = True
+    max_depth: int | None = Field(default=None, ge=0, le=100)
+    include_extensions: list[str] = []
+    exclude_extensions: list[str] = []
+    include_paths: list[str] = []
+    exclude_paths: list[str] = []
+    ignore_hidden: bool = True
+    ignore_system_paths: bool = True
+    min_size: int | None = Field(default=None, ge=0)
+    max_size: int | None = Field(default=None, ge=0)
+    modified_after_ns: int | None = Field(default=None, ge=0)
+    modified_before_ns: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def valid_ranges(self):
+        if self.min_size is not None and self.max_size is not None and self.min_size > self.max_size:
+            raise ValueError("workflow.scope_size_range_invalid")
+        if self.modified_after_ns is not None and self.modified_before_ns is not None and self.modified_after_ns > self.modified_before_ns:
+            raise ValueError("workflow.scope_time_range_invalid")
+        return self
+
+
+class AssociationPolicy(BaseModel):
+    enabled: bool = True
+    extensions: list[str] = [".srt", ".ass", ".ssa", ".nfo", ".jpg", ".jpeg", ".png"]
+    uncertain_action: Literal["review", "keep"] = "review"
+
+
+class ImpactThreshold(BaseModel):
+    max_operations: int | None = Field(default=None, ge=1)
+    max_quarantine: int | None = Field(default=None, ge=1)
+    review_above_operations: int | None = Field(default=None, ge=1)
+
+
 class TemplateExample(BaseModel):
     input_path: str
     expected_path: str | None = None
@@ -180,6 +215,9 @@ class WorkflowTemplateV2(BaseModel):
     review_policy: Literal["conservative", "balanced", "automatic"] = "balanced"
     conflict_policy: Literal["review", "append_number", "skip", "stop"] = "review"
     required_processors: dict[str, str] = {}
+    scope: WorkflowScopeConfig = WorkflowScopeConfig()
+    association_policy: AssociationPolicy = AssociationPolicy()
+    impact_threshold: ImpactThreshold = ImpactThreshold()
     stages: list[WorkflowStage]
     examples: list[TemplateExample] = []
 
@@ -258,6 +296,13 @@ class WorkflowDiagnosticsResult(BaseModel):
     errors: int
     warnings: int
     diagnostics: list[WorkflowDiagnostic]
+
+
+class WorkflowDependency(BaseModel):
+    feature: str
+    requires: list[str]
+    satisfied: bool
+    message: str
 
 
 class WorkflowImpactSummary(BaseModel):

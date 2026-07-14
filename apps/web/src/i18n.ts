@@ -41,6 +41,7 @@ const zh: Record<string,string> = {
   'Inspect small text':'检查小文本','Small text inspection':'小文本检查','Small text inspection scan queued for':'小文本检查已加入队列：',
   'Simulate full workflow':'模拟完整工作流','Final action':'最终动作','Review required':'需要审核','processing steps':'个处理步骤','Workflow diagnostics':'工作流诊断','errors':'个错误','warnings':'个警告',
   'Quick rule cards':'快捷规则卡','Insert common business rules, then adjust their options.':'插入常用业务规则，然后按需要调整参数。','Extract and prepend all dates':'提取并前置全部日期','Remove advertisement words':'删除广告词','Inherit parent folder name':'继承父目录名称','Archive by earliest year and month':'按最早日期年月归档','Detect and quarantine BT advertisements':'检测并隔离 BT 广告',
+  'WORKFLOW ENGINE 3.0':'工作流引擎 3.0','Quick':'快速模式','Standard':'标准模式','Expert':'专家模式','Scope switches':'范围开关','Include subdirectories':'包含子目录','Ignore hidden paths':'忽略隐藏路径','Include extensions':'包含扩展名','Exclude paths':'排除路径','Undo':'撤销','Redo':'重做','Draft saved locally':'草稿已保存在本地',
 }
 
 export const messages = {
