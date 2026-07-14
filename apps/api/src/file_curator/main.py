@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -71,6 +71,7 @@ from .schemas import (
     WorkflowRevisionCreate,
     WorkflowRevisionRead,
     WorkflowStage,
+    WorkflowTemplateUpdate,
     WorkflowTemplateV2,
 )
 from .services import (
@@ -232,6 +233,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             dump_template(template, format),
             media_type="application/json" if format == "json" else "application/yaml",
         )
+
+    @app.put("/api/workflow-templates/{workflow_id}", response_model=WorkflowRead)
+    def update_workflow_template(
+        workflow_id: str,
+        payload: WorkflowTemplateUpdate,
+        session: Session = Depends(session_dependency),
+    ):
+        workflow = require(Workflow, workflow_id, session)
+        validation = validate_template(payload.template.model_dump(mode="json"), registry, settings.version)
+        if not validation.valid or not validation.template:
+            raise HTTPException(422, detail={"code": "template.invalid", "errors": validation.errors})
+        template = validation.template
+        workflow.current_revision += 1
+        workflow.name = template.name
+        workflow.preset = template.preset
+        workflow.review_policy = template.review_policy
+        processors = processors_from_template(template)
+        session.add(WorkflowRevision(
+            workflow_id=workflow.id,
+            revision=workflow.current_revision,
+            config={
+                "template": template.model_dump(mode="json"),
+                "processors": [item.model_dump() for item in processors],
+            },
+        ))
+        stale_runs = select(PipelineRun.id).where(PipelineRun.workflow_id == workflow.id)
+        session.query(Plan).filter(
+            Plan.run_id.in_(stale_runs), Plan.status == "draft"
+        ).update({"status": "invalidated"}, synchronize_session=False)
+        session.commit()
+        return workflow
 
     @app.post(
         "/api/workflow-templates/{workflow_id}/test-rule", response_model=RuleTestResult
@@ -579,6 +611,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session: Session = Depends(session_dependency),
     ):
         workflow = require(Workflow, workflow_id, session)
+        stale_runs = select(PipelineRun.id).where(PipelineRun.workflow_id == workflow.id)
+        session.query(Plan).filter(
+            Plan.run_id.in_(stale_runs), Plan.status == "draft"
+        ).update({"status": "invalidated"}, synchronize_session=False)
         workflow.current_revision += 1
         if payload.review_policy:
             workflow.review_policy = payload.review_policy

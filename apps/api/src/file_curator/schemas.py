@@ -244,6 +244,10 @@ class WorkflowRevisionCreate(BaseModel):
     review_policy: Literal["conservative", "balanced", "automatic"] | None = None
 
 
+class WorkflowTemplateUpdate(BaseModel):
+    template: WorkflowTemplateV2
+
+
 class PipelineRunCreate(BaseModel):
     source_id: str
     workflow_id: str

@@ -127,7 +127,7 @@ def _clean_name(context: ProcessingContext, options: dict[str, Any]) -> None:
     current = Path(context.proposed_name or context.original_name)
     stem = unicodedata.normalize("NFC", current.stem)
     protected_dates = [match.group(0) for match in DATE_PATTERN.finditer(stem)]
-    if options.get("prepend_dates", False):
+    if options.get("prepend_dates", False) or options.get("remove_dates", False):
         for raw in protected_dates:
             stem = stem.replace(raw, " ")
     for word in options.get("remove_words", []):

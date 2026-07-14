@@ -208,7 +208,16 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
     session.add(plan)
     session.flush()
     sequence = 0
-    unresolved = kept = overridden = 0
+    unresolved = kept = overridden = conflicts = 0
+    workflow = session.get(Workflow, run.workflow_id)
+    conflict_policy = "review"
+    if workflow:
+        revision = get_revision(session, workflow)
+        if "template" in revision.config:
+            conflict_policy = revision.config["template"].get("conflict_policy", "review")
+    source = session.get(Source, run.source_id)
+    root = normalize_root(source.root_path) if source else None
+    reserved_targets: set[str] = set()
     for file_id, result in latest.items():
         entry = session.get(FileEntry, file_id)
         if not entry:
@@ -231,12 +240,56 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
             if parent is None:
                 parent = entry.parent_path
             target = (Path(parent) / name).as_posix() if parent else name
-        if target == entry.relative_path:
+        requested_kind = result.output_data.get("fields", {}).get("operation_kind")
+        if target == entry.relative_path and requested_kind != "quarantine":
             continue
+        candidate = (
+            (Path(".file-curator-quarantine") / Path(target).name).as_posix()
+            if requested_kind == "quarantine"
+            else target
+        )
+        target_exists = root is not None and resolve_inside(root, candidate).exists()
+        target_key = candidate.casefold()
+        has_conflict = target_key in reserved_targets or target_exists
+        if has_conflict and conflict_policy == "append_number":
+            path = Path(candidate)
+            counter = 1
+            while target_key in reserved_targets or (
+                root is not None and resolve_inside(root, candidate).exists()
+            ):
+                candidate = (path.parent / f"{path.stem} ({counter}){path.suffix}").as_posix()
+                target_key = candidate.casefold()
+                counter += 1
+            target = candidate
+        elif has_conflict:
+            conflicts += 1
+            if conflict_policy == "stop":
+                raise DomainError("operation.target_conflict")
+            if conflict_policy == "review":
+                unresolved += 1
+                existing_conflict = session.query(StageResult).filter_by(
+                    run_id=run.id,
+                    file_entry_id=entry.id,
+                    processor_id="plan.target_conflict",
+                ).one_or_none()
+                if existing_conflict is None:
+                    session.add(StageResult(
+                        run_id=run.id,
+                        file_entry_id=entry.id,
+                        processor_id="plan.target_conflict",
+                        processor_version="2.0.0",
+                        status="review",
+                        confidence=result.confidence,
+                        input_data={"source": entry.relative_path},
+                        output_data=result.output_data,
+                        reasons=["plan.target_conflict"],
+                        warnings=[f"operation.target_exists:{candidate}"],
+                    ))
+            continue
+        reserved_targets.add(candidate.casefold())
         target_parent = Path(target).parent.as_posix()
         if target_parent == ".":
             target_parent = ""
-        requested_kind = result.output_data.get("fields", {}).get("operation_kind")
         kind = "quarantine" if requested_kind == "quarantine" else "rename" if target_parent == entry.parent_path else "move"
         reasons = list(result.reasons)
         if decision:
@@ -258,6 +311,7 @@ def create_plan_from_pipeline(session: Session, run: PipelineRun) -> Plan:
         "unresolved_review_count": unresolved,
         "kept_count": kept,
         "overridden_count": overridden,
+        "conflict_count": conflicts,
     }
     session.commit()
     return plan

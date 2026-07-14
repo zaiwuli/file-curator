@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from .processors import ProcessorRegistry
 from .schemas import (
+    Condition,
     ConditionGroup,
     ProcessorConfig,
     RuleCard,
@@ -193,14 +194,39 @@ def builtin_templates() -> list[WorkflowTemplateV2]:
     dates = RuleCard(id="extract.dates", name="Extract all dates", actions=[WorkflowAction(kind="extract_dates")])
     parent = RuleCard(id="clean.parent", name="Inherit parent name", actions=[WorkflowAction(kind="inherit_parent")])
     archive = RuleCard(id="target.archive", name="Archive by year and month", actions=[WorkflowAction(kind="archive", options={"path_template": "{year}/{month}", "missing_date": "keep"})])
-    quarantine = RuleCard(id="target.junk", name="Quarantine junk candidates", actions=[WorkflowAction(kind="quarantine"), WorkflowAction(kind="require_review")])
+    incomplete = ConditionGroup(mode="any", conditions=[
+        Condition(field="extension", operator="in", value=[".crdownload", ".part", ".tmp"]),
+        Condition(field="is_empty", operator="is_true"),
+    ])
+    quarantine = RuleCard(id="target.junk", name="Quarantine junk candidates", conditions=incomplete, actions=[WorkflowAction(kind="quarantine"), WorkflowAction(kind="require_review")])
+    image_filter = ConditionGroup(mode="any", conditions=[Condition(
+        field="extension", operator="in", value=[".jpg", ".jpeg", ".png", ".webp", ".heic"]
+    )])
+    media_filter = ConditionGroup(mode="any", conditions=[Condition(
+        field="extension", operator="in", value=[".mp4", ".mkv", ".avi", ".mov", ".srt", ".ass"]
+    )])
+    media_classify = RuleCard(
+        id="classify.media", name="Classify media files", conditions=media_filter,
+        actions=[WorkflowAction(kind="run_processor", options={"processor_id": "classify_extension"})],
+    )
+    media_target = RuleCard(
+        id="target.media", name="Organize by media category", conditions=media_filter,
+        actions=[WorkflowAction(kind="archive", options={"path_template": "{category}", "missing_date": "keep"})],
+    )
+    image_dates = RuleCard(id="extract.image_dates", name="Extract image dates", conditions=image_filter, actions=[WorkflowAction(kind="extract_dates")])
+    image_archive = RuleCard(id="target.image_archive", name="Archive dated images", conditions=image_filter, actions=[WorkflowAction(kind="archive", options={"path_template": "{year}/{month}", "missing_date": "review"})])
+    duplicates = RuleCard(
+        id="review.duplicates", name="Review duplicate candidates",
+        conditions=ConditionGroup(conditions=[Condition(field="duplicate_candidate", operator="is_true")]),
+        actions=[WorkflowAction(kind="require_review")],
+    )
     return [
         WorkflowTemplateV2(name="Clean file names", description="Normalize names without moving files.", stages=stages(("clean", clean))),
         WorkflowTemplateV2(name="Archive by year and month", description="Extract dates and archive within the source.", preset="rename_and_organize", stages=stages(("extract", dates), ("target", archive))),
         WorkflowTemplateV2(name="Inherit parent folder", description="Prefix names with the direct parent folder.", stages=stages(("clean", parent))),
-        WorkflowTemplateV2(name="Image date archive", description="Archive dated images by year and month.", preset="rename_and_organize", stages=stages(("extract", dates), ("target", archive))),
-        WorkflowTemplateV2(name="Media organization", description="Extract metadata and organize known media types.", preset="rename_and_organize", stages=stages(("clean", clean))),
+        WorkflowTemplateV2(name="Image date archive", description="Archive dated images by year and month.", preset="rename_and_organize", stages=stages(("extract", image_dates), ("target", image_archive))),
+        WorkflowTemplateV2(name="Media organization", description="Classify and organize common media and sidecar files.", preset="rename_and_organize", stages=stages(("classify", media_classify), ("clean", clean), ("target", media_target))),
         WorkflowTemplateV2(name="Downloads cleanup", description="Clean download names and review incomplete files.", stages=stages(("clean", clean), ("target", quarantine))),
         WorkflowTemplateV2(name="Ads and temporary file quarantine", description="Quarantine configured junk candidates for review.", stages=stages(("target", quarantine))),
-        WorkflowTemplateV2(name="Duplicate file review", description="Send duplicate candidates to review.", stages=stages(("review", RuleCard(id="review.duplicates", name="Review duplicates", actions=[WorkflowAction(kind="require_review")])))),
+        WorkflowTemplateV2(name="Duplicate file review", description="Send indexed duplicate candidates to review.", stages=stages(("review", duplicates))),
     ]

@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, Schedule, StageResult, Workflow, WorkflowCompare, WorkflowPortable, WorkflowRevision } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCompare, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -26,6 +26,13 @@ export const api = {
   sources: () => request<ApiSource[]>('/sources'),
   workflows: () => request<Workflow[]>('/workflows'),
   processors: () => request<ProcessorManifest[]>('/processors'),
+  workflowTemplates: () => request<WorkflowTemplateV2[]>('/workflow-templates'),
+  validateTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto') => post<TemplateValidation>('/workflow-templates/validate', { content, format }),
+  importTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto') => post<Workflow>('/workflow-templates/import', { content, format }),
+  updateTemplate: (id: string, template: WorkflowTemplateV2) => request<Workflow>(`/workflow-templates/${id}`, { method: 'PUT', body: JSON.stringify({ template }) }),
+  exportTemplate: async (id: string, format: 'yaml'|'json') => { const response=await fetch(`${apiBase}/workflow-templates/${id}/export?format=${format}`); if(!response.ok)throw new Error(`template.export_http_${response.status}`); return response.text() },
+  testRule: (id: string, rule: RuleCard, relative_path: string) => post<{matched:boolean;status:string;input:Record<string,unknown>;output:Record<string,unknown>;reasons:string[];warnings:string[]}>(`/workflow-templates/${id}/test-rule`, { rule, relative_path }),
+  workflowImpact: (id: string, sourceId: string) => post<WorkflowImpact>(`/workflows/${id}/impact?source_id=${encodeURIComponent(sourceId)}`),
   pipelineRuns: () => request<PipelineRun[]>('/pipeline-runs'),
   reviews: (runId?: string) => request<ReviewItem[]>(`/reviews${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`),
   plans: () => request<PlanSummary[]>('/plans'),

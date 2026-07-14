@@ -6,7 +6,8 @@ import { messages, useDocumentLocale, type Locale } from '../i18n'
 import { DashboardPage } from '../pages/DashboardPage'
 import { SourcesPage } from '../pages/SourcesPage'
 import { FileBrowserPage } from '../pages/FileBrowserPage'
-import { ExecutionPage, HistoryPage, PipelinePage, PreviewPage, ReviewPage, SettingsPage } from '../pages/WorkbenchPages'
+import { ExecutionPage, HistoryPage, PreviewPage, ReviewPage, SettingsPage } from '../pages/WorkbenchPages'
+import { WorkflowBuilderV2 } from '../pages/WorkflowBuilderV2'
 import type { Page } from '../types'
 
 const navItems: { id: Page; label: string; icon: React.ComponentType<{size?:number}> }[] = [
@@ -23,7 +24,7 @@ export function App() {
     {page==='dashboard'&&<DashboardPage setPage={setPage} state={workspace.state} workflows={workspace.workflows} plans={workspace.plans}/>} 
     {page==='sources'&&<SourcesPage notify={notify} data={workspace.sources} state={workspace.state} error={workspace.error} refresh={workspace.refresh}/>} 
     {page==='files'&&<FileBrowserPage sources={workspace.apiSources} notify={notify}/>}
-    {page==='pipeline'&&<PipelinePage {...common} sources={workspace.apiSources} workflows={workspace.workflows} processors={workspace.processors} runs={workspace.runs} openPreview={()=>setPage('preview')}/>}
+    {page==='pipeline'&&<WorkflowBuilderV2 {...common} sources={workspace.apiSources} workflows={workspace.workflows} openPreview={()=>setPage('preview')}/>}
     {page==='review'&&<ReviewPage {...common} reviews={workspace.reviews} runs={workspace.runs}/>}
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 

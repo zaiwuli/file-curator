@@ -139,3 +139,95 @@ def test_template_api_yaml_import_export_and_impact(
     impact = client.post(f"/api/workflows/{workflow_id}/impact?source_id={source['id']}")
     assert impact.status_code == 200, impact.text
     assert impact.json()["archive"] == 1
+
+
+def scan_source(client: TestClient, media_root: Path) -> str:
+    source = client.post(
+        "/api/sources", json={"name": "Rules", "root_path": str(media_root)}
+    ).json()
+    scan = client.post("/api/scans", json={"source_id": source["id"]}).json()
+    for _ in range(100):
+        current = next(item for item in client.get("/api/scans").json() if item["id"] == scan["id"])
+        if current["status"] == "completed":
+            break
+        __import__("time").sleep(0.02)
+    return source["id"]
+
+
+def import_and_run(client: TestClient, source_id: str, template: WorkflowTemplateV2) -> dict:
+    workflow = client.post(
+        "/api/workflow-templates/import",
+        json={"content": dump_template(template, "json"), "format": "json"},
+    ).json()
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source_id, "workflow_id": workflow["id"]},
+    ).json()
+    return {"workflow": workflow, "run": run}
+
+
+def test_quarantine_review_accept_creates_operation(client: TestClient, media_root: Path) -> None:
+    (media_root / "advert.tmp").write_text("junk")
+    source_id = scan_source(client, media_root)
+    template = template_with(("target", RuleCard(
+        id="quarantine",
+        name="Quarantine",
+        actions=[WorkflowAction(kind="quarantine")],
+    )))
+    values = import_and_run(client, source_id, template)
+    reviews = client.get("/api/reviews", params={"run_id": values["run"]["id"]}).json()
+    assert len(reviews) == 1
+    client.put(
+        f"/api/reviews/{values['run']['id']}/{reviews[0]['file_entry_id']}",
+        json={"action": "accept"},
+    )
+    plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
+    assert plan["operations"][0]["kind"] == "quarantine"
+    assert plan["operations"][0]["source_relative_path"] == "advert.tmp"
+
+
+def conflict_template(policy: str) -> WorkflowTemplateV2:
+    template = template_with(("clean", RuleCard(
+        id="fixed",
+        name="Fixed target",
+        actions=[WorkflowAction(kind="render_name", options={"name_template": "fixed.mp4"})],
+    )))
+    return template.model_copy(update={"conflict_policy": policy})
+
+
+def test_append_number_conflict_policy(client: TestClient, media_root: Path) -> None:
+    (media_root / "source.mp4").write_text("source")
+    (media_root / "fixed.mp4").write_text("existing")
+    source_id = scan_source(client, media_root)
+    values = import_and_run(client, source_id, conflict_template("append_number"))
+    plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
+    targets = [item["target_relative_path"] for item in plan["operations"]]
+    assert "fixed (1).mp4" in targets
+
+
+def test_skip_and_stop_conflict_policies(client: TestClient, media_root: Path) -> None:
+    (media_root / "source.mp4").write_text("source")
+    (media_root / "fixed.mp4").write_text("existing")
+    source_id = scan_source(client, media_root)
+    skipped = import_and_run(client, source_id, conflict_template("skip"))
+    plan = client.post("/api/plans", json={"run_id": skipped["run"]["id"]}).json()
+    assert plan["summary"]["conflict_count"] >= 1
+    stopped = import_and_run(client, source_id, conflict_template("stop"))
+    response = client.post("/api/plans", json={"run_id": stopped["run"]["id"]})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "operation.target_conflict"
+
+
+def test_workflow_update_invalidates_draft_plans(client: TestClient, media_root: Path) -> None:
+    (media_root / "source.mp4").write_text("source")
+    source_id = scan_source(client, media_root)
+    template = conflict_template("append_number")
+    values = import_and_run(client, source_id, template)
+    plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
+    template.name = "Updated template"
+    response = client.put(
+        f"/api/workflow-templates/{values['workflow']['id']}", json={"template": template.model_dump(mode="json")}
+    )
+    assert response.status_code == 200
+    plans = client.get("/api/plans").json()
+    assert next(item for item in plans if item["id"] == plan["id"])["status"] == "invalidated"

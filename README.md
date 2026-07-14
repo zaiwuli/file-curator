@@ -83,8 +83,12 @@ See [deployment](docs/deployment.md), [Synology](docs/synology.md), and [archite
 
 Version 1.0 includes local sources, metadata and opt-in hash scans, file browsing, file groups, deterministic processor revisions and traces, per-file review decisions, virtual plans, freeze/confirm, preflight, bounded execution, post-operation verification, pause/cancel/retry, audit history, online SQLite backup, scheduled scans, webhook summaries, quarantine, rollback simulation, and whole-batch rollback.
 
+Workflow Engine 2.0 adds eight ordered processing gates, visual condition and action cards, built-in templates, YAML/JSON import and export, legacy v1 conversion, multi-date extraction, protected number cleanup, parent-folder inheritance, same-source archive and move actions, quarantine review, conflict policies, single-rule testing, and impact summaries. Raw JSON is kept in an optional developer section; common rules can be configured through forms.
+
 The desktop UI supports English and Simplified Chinese and is wired to source, browser, workflow, review, plan, execution, recovery, scheduling, backup, and diagnostics APIs. Content hashing remains explicitly opt-in. Restore a backup while the service is stopped with `python -m file_curator restore-backup --backup FILE.db`.
 
 Set `FILE_CURATOR_WEBHOOK_URL` to receive scan and execution completion summaries. The payload contains job identifiers, status, and counters; it does not include file paths. Docker image execution is validated in CI because a Docker engine is not required for local frontend/backend development.
 
 Run the desktop end-to-end suite with `npm run test:e2e` after installing Chromium using `npx playwright install chromium`.
+
+See [Workflow Engine 2.0](docs/workflow-v2.md) for template authoring, AI-assisted template paste, safety limits, and a complete example.

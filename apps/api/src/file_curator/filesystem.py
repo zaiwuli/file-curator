@@ -22,12 +22,14 @@ def normalize_root(path: str | Path) -> Path:
 
 def safe_relative(value: str) -> Path:
     path = Path(value)
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{number}" for number in range(1, 10)), *(f"LPT{number}" for number in range(1, 10))}
     if (
         path.is_absolute()
         or path.anchor
         or path.drive
         or ":" in value
         or any(part == ".." for part in path.parts)
+        or any(part.rstrip(" .").split(".", 1)[0].upper() in reserved for part in path.parts)
     ):
         raise FileSafetyError("path.outside_source")
     return path
