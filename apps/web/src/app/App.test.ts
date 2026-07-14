@@ -22,5 +22,7 @@ describe('localization resources', () => {
     expect(translate('zh-CN', '· score')).toBe('· 分数')
     expect(translate('zh-CN', 'files')).toBe('个文件')
     expect(translate('zh-CN', 'workflows')).toBe('工作流')
+    expect(translate('zh-CN', 'Build an organization workflow')).toBe('创建整理流程')
+    expect(translate('zh-CN', 'feature groups selected · no real file changes')).toBe('项功能已选择 · 不会修改真实文件')
   })
 })

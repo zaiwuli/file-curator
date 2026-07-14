@@ -23,7 +23,7 @@ export function App() {
     {page==='dashboard'&&<DashboardPage setPage={setPage} state={workspace.state} workflows={workspace.workflows} plans={workspace.plans}/>} 
     {page==='sources'&&<SourcesPage notify={notify} data={workspace.sources} state={workspace.state} error={workspace.error} refresh={workspace.refresh}/>} 
     {page==='files'&&<FileBrowserPage sources={workspace.apiSources} notify={notify}/>}
-    {page==='pipeline'&&<PipelinePage {...common} sources={workspace.apiSources} workflows={workspace.workflows} processors={workspace.processors} runs={workspace.runs}/>} 
+    {page==='pipeline'&&<PipelinePage {...common} sources={workspace.apiSources} workflows={workspace.workflows} processors={workspace.processors} runs={workspace.runs} openPreview={()=>setPage('preview')}/>}
     {page==='review'&&<ReviewPage {...common} reviews={workspace.reviews} runs={workspace.runs}/>}
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 

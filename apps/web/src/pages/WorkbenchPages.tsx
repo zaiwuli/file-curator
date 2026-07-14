@@ -1,7 +1,7 @@
-import { CheckCircle2, CirclePause, RotateCcw, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, CirclePause, Eye, FilePenLine, FolderTree, RotateCcw, SearchCheck, ShieldCheck, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewItem, RollbackPreview, Schedule, Workflow, WorkflowCompare, WorkflowPortable, WorkflowRevision } from '../types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, PipelineRun, PlanSummary, ProcessorConfig, ProcessorManifest, ReviewItem, RollbackPreview, Schedule, Workflow, WorkflowPortable } from '../types'
 
 type ActionProps = { notify: (message: string) => void; refresh: () => Promise<void> }
 
@@ -17,34 +17,72 @@ async function perform(action: () => Promise<unknown>, refresh: () => Promise<vo
   try { await action(); await refresh(); notify(success) } catch (cause) { notify(cause instanceof Error ? cause.message : 'api.request_failed') }
 }
 
-export function PipelinePage({ sources, workflows, processors, runs, notify, refresh }: ActionProps & { sources: { id: string; name: string }[]; workflows: Workflow[]; processors: ProcessorManifest[]; runs: PipelineRun[] }) {
-  const [sourceId, setSourceId] = useState('')
-  const [workflowId, setWorkflowId] = useState('')
-  const [name, setName] = useState('Rename Only')
-  const [preset, setPreset] = useState('rename_only')
-  const [policy, setPolicy] = useState('balanced')
-  const [configs, setConfigs] = useState<ProcessorConfig[]>([])
+export function PipelinePage({ sources, workflows, processors, runs, notify, refresh, openPreview }: ActionProps & { sources: { id: string; name: string }[]; workflows: Workflow[]; processors: ProcessorManifest[]; runs: PipelineRun[]; openPreview: () => void }) {
+  const [sourceId,setSourceId]=useState('')
+  const [workflowId,setWorkflowId]=useState('')
+  const [name,setName]=useState('Rename Only')
+  const [preset,setPreset]=useState<'rename_only'|'rename_and_organize'>('rename_only')
+  const [policy,setPolicy]=useState('balanced')
+  const [mode,setMode]=useState<'simple'|'advanced'>('simple')
+  const [busy,setBusy]=useState(false)
+  const [prefixes,setPrefixes]=useState('')
+  const [replaceSeparators,setReplaceSeparators]=useState(true)
+  const [configs,setConfigs]=useState<ProcessorConfig[]>([])
   const [selectedProcessor,setSelectedProcessor]=useState('')
   const [optionText,setOptionText]=useState('{}')
-  const [revisions,setRevisions]=useState<WorkflowRevision[]>([])
-  const [comparison,setComparison]=useState<WorkflowCompare|null>(null)
   const [portableText,setPortableText]=useState('')
-  useEffect(() => { if (!sourceId && sources[0]) setSourceId(sources[0].id) }, [sourceId, sources])
-  useEffect(() => { if (!workflowId && workflows[0]) setWorkflowId(workflows[0].id) }, [workflowId, workflows])
-  useEffect(() => { const next=processors.map(item => ({ id: item.id, enabled: item.default_enabled, options: {} })); setConfigs(next); setSelectedProcessor(current=>current||next[0]?.id||'') }, [processors])
+
+  useEffect(()=>{if(!sourceId&&sources[0])setSourceId(sources[0].id)},[sourceId,sources])
+  useEffect(()=>{const next=processors.map(item=>({id:item.id,enabled:item.default_enabled,options:{}}));setConfigs(next);setSelectedProcessor(current=>current||next[0]?.id||'')},[processors])
   useEffect(()=>{const config=configs.find(item=>item.id===selectedProcessor);if(config)setOptionText(JSON.stringify(config.options,null,2))},[selectedProcessor,configs])
-  useEffect(()=>{if(!workflowId){setRevisions([]);setComparison(null);return}void api.workflowRevisions(workflowId).then(async rows=>{setRevisions(rows);if(rows.length>=2)setComparison(await api.compareWorkflow(workflowId,rows[1].revision,rows[0].revision));else setComparison(null)}).catch(cause=>notify(cause instanceof Error?cause.message:'api.request_failed'))},[workflowId,workflows,notify])
-  const selected = workflows.find(item => item.id === workflowId)
-  const toggle = (id: string) => setConfigs(items => items.map(item => item.id === id ? { ...item, enabled: !item.enabled } : item))
-  const create = () => perform(async () => { const workflow = await api.createWorkflow({ name, preset, review_policy: policy, processors: configs }); setWorkflowId(workflow.id) }, refresh, notify, 'Workflow created')
-  const revise = () => selected && perform(() => api.reviseWorkflow(selected.id, configs, policy), refresh, notify, 'Workflow revision saved')
-  const run = () => sourceId && workflowId && perform(() => api.runPipeline(sourceId, workflowId), refresh, notify, 'Virtual processing completed')
+  const selected=workflows.find(item=>item.id===workflowId)
+  const featureGroups=[
+    {id:'clean',icon:Sparkles,title:'Clean file names',description:'Remove extra spaces and normalize separators.',processors:['normalize_name']},
+    {id:'recognize',icon:SearchCheck,title:'Recognize file details',description:'Detect dates, identifiers, episodes, quality, language and file type.',processors:['extract_date','extract_identifier','extract_sequence','extract_quality','extract_language','extract_parent_context','extract_source_prefix','classify_extension']},
+    {id:'junk',icon:ShieldCheck,title:'Flag junk candidates',description:'Mark temporary and incomplete downloads for review.',processors:['detect_junk']},
+  ]
+  const groupEnabled=(ids:string[])=>ids.some(id=>configs.find(item=>item.id===id)?.enabled)
+  const setGroup=(ids:string[],enabled:boolean)=>setConfigs(items=>items.map(item=>ids.includes(item.id)?{...item,enabled}:item))
+  const toggle=(id:string)=>setConfigs(items=>items.map(item=>item.id===id?{...item,enabled:!item.enabled}:item))
+  const choosePreset=(value:'rename_only'|'rename_and_organize')=>{
+    setPreset(value);setName(value==='rename_only'?'Rename Only':'Rename And Organize')
+    setConfigs(items=>items.map(item=>item.id==='target_template'?{...item,enabled:value==='rename_and_organize',options:value==='rename_and_organize'?{parent_template:'{category}'}:{}}:item.id==='classify_extension'&&value==='rename_and_organize'?{...item,enabled:true}:item))
+  }
+  const preparedConfigs=()=>{
+    const removePrefixes=prefixes.split(',').map(value=>value.trim()).filter(Boolean)
+    const next=configs.map(item=>item.id==='normalize_name'?{...item,options:{...item.options,remove_prefixes:removePrefixes,replacements:replaceSeparators?[{pattern:'[._]+',replacement:' '}]:[]}}:item.id==='target_template'&&preset==='rename_and_organize'?{...item,enabled:true,options:{...item.options,parent_template:'{category}'}}:item)
+    return [...next.filter(item=>item.id!=='target_template'),...next.filter(item=>item.id==='target_template')]
+  }
+  const preview=async()=>{
+    if(!sourceId)return
+    setBusy(true)
+    try{
+      const payload=preparedConfigs()
+      let id=selected?.id
+      if(id)await api.reviseWorkflow(id,payload,policy)
+      else{const workflow=await api.createWorkflow({name,preset,review_policy:policy,processors:payload});id=workflow.id;setWorkflowId(id)}
+      const run=await api.runPipeline(sourceId,id)
+      await api.createPlan(run.id)
+      await refresh();notify('Preview generated; real files are unchanged');openPreview()
+    }catch(cause){notify(cause instanceof Error?cause.message:'api.request_failed')}finally{setBusy(false)}
+  }
   const applyOptions=()=>{try{const options=JSON.parse(optionText) as Record<string,unknown>;setConfigs(items=>items.map(item=>item.id===selectedProcessor?{...item,options}:item));notify('Processor options applied')}catch{notify('processor.options_invalid_json')}}
+  const saveAdvanced=()=>selected?perform(()=>api.reviseWorkflow(selected.id,configs,policy),refresh,notify,'Workflow revision saved'):perform(async()=>{const workflow=await api.createWorkflow({name,preset,review_policy:policy,processors:configs});setWorkflowId(workflow.id)},refresh,notify,'Workflow created')
+  const runAdvanced=()=>sourceId&&workflowId&&perform(()=>api.runPipeline(sourceId,workflowId),refresh,notify,'Virtual processing completed')
   const exportDefinition=()=>selected&&perform(async()=>{const definition=await api.exportWorkflow(selected.id);setPortableText(JSON.stringify(definition,null,2))},async()=>{},notify,'Workflow exported below')
   const importDefinition=()=>perform(()=>api.importWorkflow(JSON.parse(portableText) as WorkflowPortable),refresh,notify,'Workflow imported')
-  return <><Header eyebrow="DETERMINISTIC PIPELINE" heading="Workflow builder" description="Each enabled processor records its input, output, reasons and decision score." actions={<><button className="button secondary" disabled={!selected} onClick={()=>void revise()}>Save revision</button><button className="button primary" disabled={!sourceId||!workflowId} onClick={()=>void run()}>Run simulation</button></>}/>
-    <div className="pipeline-layout"><section className="panel stages-panel"><div className="panel-heading"><div><div className="section-kicker">PROCESSORS</div><h2>Runtime switches</h2></div><Badge value="simulation"/></div>{configs.map(config => { const manifest = processors.find(item => item.id === config.id); return <div className={!config.enabled?'stage-row disabled':'stage-row'} key={config.id}><span className="stage-number">{manifest?.category.slice(0,1).toUpperCase()}</span><div className="stage-copy"><strong>{config.id.replaceAll('_',' ')}</strong><small>v{manifest?.version} · {manifest?.safety_class} · score {manifest?.score_weight}</small></div><button className="button quiet" onClick={()=>setSelectedProcessor(config.id)}>Configure</button><button aria-label={`Toggle ${config.id}`} className={`toggle ${config.enabled?'on':''}`} onClick={()=>toggle(config.id)}><span/></button></div>})}</section>
-      <aside className="panel processor-panel"><div className="section-kicker">WORKFLOW</div><h2>{selected ? selected.name : 'Create workflow'}</h2><label className="form-label">Name</label><input className="text-input" value={name} onChange={e=>setName(e.target.value)}/><label className="form-label">Preset</label><select className="text-input" value={preset} onChange={e=>setPreset(e.target.value)}><option value="rename_only">Rename Only</option><option value="rename_and_organize">Rename And Organize</option></select><label className="form-label">Review policy</label><select className="text-input" value={policy} onChange={e=>setPolicy(e.target.value)}><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="automatic">Automatic</option></select><label className="form-label">Source</label><select className="text-input" value={sourceId} onChange={e=>setSourceId(e.target.value)}>{sources.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><label className="form-label">Existing workflow</label><select className="text-input" value={workflowId} onChange={e=>setWorkflowId(e.target.value)}><option value="">New workflow</option>{workflows.map(item=><option key={item.id} value={item.id}>{item.name} · rev {item.current_revision}</option>)}</select><button className="button secondary" onClick={()=>void create()}>Create as new</button><label className="form-label">{selectedProcessor.replaceAll('_',' ')} options (JSON)</label><textarea className="text-input option-editor" value={optionText} onChange={event=>setOptionText(event.target.value)}/><button className="button secondary" onClick={applyOptions}>Apply processor options</button><div className="callout"><ShieldCheck size={15}/><div><strong>Latest run</strong><small>{runs[0] ? `${runs[0].status} · revision ${runs[0].workflow_revision}` : 'No pipeline run yet'}</small></div></div></aside></div><section className="panel workflow-portable"><div className="panel-heading"><div><div className="section-kicker">MAINTENANCE</div><h2>Revision comparison and portable JSON</h2></div><div className="header-actions"><button className="button secondary" disabled={!selected} onClick={()=>void exportDefinition()}>Export</button><button className="button secondary" disabled={!portableText} onClick={()=>void importDefinition()}>Import as new</button></div></div>{comparison&&<div className="revision-diff"><span>Rev {comparison.from_revision} → {comparison.to_revision}</span><code>Added: {comparison.added.join(', ')||'none'}</code><code>Removed: {comparison.removed.join(', ')||'none'}</code><code>Changed: {comparison.changed.join(', ')||'none'}</code></div>}<textarea className="text-input portable-editor" value={portableText} onChange={event=>setPortableText(event.target.value)} placeholder="Exported workflow JSON or paste a workflow definition to import"/><small className="muted">{revisions.length} stored revisions</small></section></>
+
+  return <><Header eyebrow="FILE ORGANIZATION" heading="Build an organization workflow" description="Choose what you want to change. A preview is required before any real file is touched." actions={<div className="segmented workflow-mode"><button className={mode==='simple'?'selected':''} onClick={()=>setMode('simple')}>Simple</button><button className={mode==='advanced'?'selected':''} onClick={()=>setMode('advanced')}><SlidersHorizontal size={13}/> Advanced</button></div>}/>
+    {mode==='simple'&&<section className="panel workflow-guide">
+      <div className="guide-step"><span className="guide-number">1</span><div className="guide-content"><h2>Choose the folder to process</h2><p>Only indexed metadata is used until you confirm a final plan.</p><select className="text-input guide-select" value={sourceId} onChange={event=>setSourceId(event.target.value)}><option value="">Select source</option>{sources.map(source=><option value={source.id} key={source.id}>{source.name}</option>)}</select>{sources.length===0&&<div className="inline-notice">Add and scan a source before building a workflow.</div>}</div></div>
+      <div className="guide-step"><span className="guide-number">2</span><div className="guide-content"><h2>Choose the result</h2><p>Start with rename only. Folder organization may require review when a file type is unknown.</p><div className="workflow-choice-grid"><button className={preset==='rename_only'?'workflow-choice selected':'workflow-choice'} onClick={()=>choosePreset('rename_only')}><FilePenLine size={19}/><span><strong>Rename files only</strong><small>Clean names without moving files.</small></span><CheckCircle2 size={16}/></button><button className={preset==='rename_and_organize'?'workflow-choice selected':'workflow-choice'} onClick={()=>choosePreset('rename_and_organize')}><FolderTree size={19}/><span><strong>Rename and organize</strong><small>Clean names and place known types into folders.</small></span><CheckCircle2 size={16}/></button></div></div></div>
+      <div className="guide-step"><span className="guide-number">3</span><div className="guide-content"><h2>Choose what to detect and clean</h2><p>Recommended options are enabled. Turn off anything you do not need.</p><div className="feature-list">{featureGroups.map(feature=>{const Icon=feature.icon;const enabled=groupEnabled(feature.processors);return <div className="feature-row" key={feature.id}><span className="feature-icon"><Icon size={17}/></span><div><strong>{feature.title}</strong><small>{feature.description}</small></div><button aria-label={`Toggle ${feature.title}`} className={`toggle ${enabled?'on':''}`} onClick={()=>setGroup(feature.processors,!enabled)}><span/></button></div>})}</div><div className="simple-options"><label><span>Prefixes to remove</span><input className="text-input" value={prefixes} onChange={event=>setPrefixes(event.target.value)} placeholder="Example: [WEB], SAMPLE_"/></label><label className="checkbox-line"><input type="checkbox" checked={replaceSeparators} onChange={event=>setReplaceSeparators(event.target.checked)}/><span>Convert dots and underscores to spaces</span></label></div></div></div>
+      <div className="guide-step final"><span className="guide-number">4</span><div className="guide-content"><h2>Generate a safe preview</h2><p>You will review before and after paths on the next screen.</p><div className="preview-action"><div><Eye size={18}/><span><strong>{preset==='rename_only'?'Rename only':'Rename and organize'}</strong><small>{featureGroups.filter(feature=>groupEnabled(feature.processors)).length} feature groups selected · no real file changes</small></span></div><button className="button primary" disabled={!sourceId||busy} onClick={()=>void preview()}>{busy?'Generating preview...':'Save and generate preview'}</button></div></div></div>
+    </section>}
+    {mode==='advanced'&&<><div className="pipeline-layout"><section className="panel stages-panel"><div className="panel-heading"><div><div className="section-kicker">PROCESSORS</div><h2>Runtime switches</h2></div><Badge value="simulation"/></div>{configs.map(config=>{const manifest=processors.find(item=>item.id===config.id);return <div className={!config.enabled?'stage-row disabled':'stage-row'} key={config.id}><span className="stage-number">{manifest?.category.slice(0,1).toUpperCase()}</span><div className="stage-copy"><strong>{config.id.replaceAll('_',' ')}</strong><small>v{manifest?.version} · {manifest?.safety_class} · score {manifest?.score_weight}</small></div><button className="button quiet" onClick={()=>setSelectedProcessor(config.id)}>Configure</button><button aria-label={`Toggle ${config.id}`} className={`toggle ${config.enabled?'on':''}`} onClick={()=>toggle(config.id)}><span/></button></div>})}</section>
+      <aside className="panel processor-panel"><div className="section-kicker">WORKFLOW</div><h2>{selected?selected.name:'Advanced configuration'}</h2><label className="form-label">Source</label><select className="text-input" value={sourceId} onChange={event=>setSourceId(event.target.value)}>{sources.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><label className="form-label">Existing workflow</label><select className="text-input" value={workflowId} onChange={event=>setWorkflowId(event.target.value)}><option value="">New workflow</option>{workflows.map(item=><option key={item.id} value={item.id}>{item.name} · rev {item.current_revision}</option>)}</select><label className="form-label">Name</label><input className="text-input" value={name} onChange={event=>setName(event.target.value)}/><label className="form-label">Review policy</label><select className="text-input" value={policy} onChange={event=>setPolicy(event.target.value)}><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="automatic">Automatic</option></select><label className="form-label">{selectedProcessor.replaceAll('_',' ')} options (JSON)</label><textarea className="text-input option-editor" value={optionText} onChange={event=>setOptionText(event.target.value)}/><button className="button secondary" onClick={applyOptions}>Apply processor options</button><div className="advanced-actions"><button className="button secondary" onClick={()=>void saveAdvanced()}>{selected?'Save revision':'Create workflow'}</button><button className="button primary" disabled={!sourceId||!workflowId} onClick={()=>void runAdvanced()}>Run simulation</button></div><div className="callout"><ShieldCheck size={15}/><div><strong>Latest run</strong><small>{runs[0]?`${runs[0].status} · revision ${runs[0].workflow_revision}`:'No pipeline run yet'}</small></div></div></aside></div>
+      <details className="panel workflow-portable"><summary>Import or export workflow JSON</summary><div className="header-actions"><button className="button secondary" disabled={!selected} onClick={()=>void exportDefinition()}>Export</button><button className="button secondary" disabled={!portableText} onClick={()=>void importDefinition()}>Import as new</button></div><textarea className="text-input portable-editor" value={portableText} onChange={event=>setPortableText(event.target.value)} placeholder="Exported workflow JSON or paste a workflow definition to import"/></details></>}
+  </>
 }
 
 export function ReviewPage({ reviews, runs, notify, refresh }: ActionProps & { reviews: ReviewItem[]; runs: PipelineRun[] }) {

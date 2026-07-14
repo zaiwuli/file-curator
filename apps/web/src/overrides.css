@@ -42,3 +42,44 @@
 .schedule-row div { display: grid; gap: 2px; }
 .schedule-row small { color: #60717c; }
 .toggle-button { border: 0; background: transparent; color: #315a83; cursor: pointer; font: inherit; }
+.workflow-mode { align-items: center; }
+.workflow-mode button { display: inline-flex; align-items: center; gap: 5px; height: 30px; }
+.workflow-guide { padding: 0 24px; }
+.guide-step { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 15px; padding: 24px 0; border-bottom: 1px solid #e8ecef; }
+.guide-step:last-child { border-bottom: 0; }
+.guide-number { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: #e8effa; color: #2f62ad; font-size: 11px; font-weight: 800; }
+.guide-content h2 { margin: 1px 0 5px; font-size: 16px; }
+.guide-content > p { margin: 0 0 15px; color: #6d7b86; font-size: 11px; line-height: 1.5; }
+.guide-select { max-width: 460px; height: 40px; font-size: 12px; }
+.inline-notice { margin-top: 10px; color: #9a5c18; font-size: 10px; }
+.workflow-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.workflow-choice { min-height: 76px; display: grid; grid-template-columns: 26px 1fr 18px; align-items: center; gap: 10px; border: 1px solid #d8dfe4; border-radius: 6px; background: #fff; color: #34424d; padding: 12px 14px; text-align: left; }
+.workflow-choice:hover { border-color: #9eb5d7; background: #f8fafc; }
+.workflow-choice.selected { border-color: #4c78bb; background: #f2f6fc; box-shadow: inset 3px 0 #3f72bd; }
+.workflow-choice > svg:first-child { color: #4772b2; }
+.workflow-choice > svg:last-child { color: transparent; }
+.workflow-choice.selected > svg:last-child { color: #27785a; }
+.workflow-choice strong,.workflow-choice small { display: block; }
+.workflow-choice strong { font-size: 12px; }
+.workflow-choice small { margin-top: 5px; color: #71808b; font-size: 10px; line-height: 1.4; }
+.feature-list { border: 1px solid #dfe5e8; border-radius: 6px; overflow: hidden; }
+.feature-row { min-height: 64px; display: grid; grid-template-columns: 34px minmax(0,1fr) 34px; gap: 11px; align-items: center; padding: 10px 13px; border-bottom: 1px solid #e9edef; }
+.feature-row:last-child { border-bottom: 0; }
+.feature-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 5px; color: #3f6da8; background: #edf2f8; }
+.feature-row strong,.feature-row small { display: block; }
+.feature-row strong { font-size: 11px; }
+.feature-row small { margin-top: 4px; color: #75838e; font-size: 9px; line-height: 1.4; }
+.simple-options { display: grid; grid-template-columns: minmax(280px,1fr) minmax(280px,1fr); gap: 18px; align-items: end; padding-top: 15px; }
+.simple-options label > span:first-child { display: block; margin-bottom: 7px; color: #677682; font-size: 10px; font-weight: 700; }
+.simple-options .checkbox-line { min-height: 36px; margin: 0; }
+.preview-action { display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid #cfe0d8; border-radius: 6px; background: #f1f8f5; padding: 14px; }
+.preview-action > div { display: flex; align-items: center; gap: 11px; color: #287458; }
+.preview-action strong,.preview-action small { display: block; }
+.preview-action strong { color: #2d3c45; font-size: 11px; }
+.preview-action small { margin-top: 4px; color: #667b70; font-size: 9px; }
+.advanced-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.processor-panel .advanced-actions .button { width: 100%; }
+.workflow-portable summary { cursor: pointer; color: #344f70; font-size: 11px; font-weight: 700; }
+.workflow-portable[open] summary { margin-bottom: 12px; }
+.workflow-portable .header-actions { margin-bottom: 10px; }
+@media (max-width: 1180px) { .workflow-choice-grid,.simple-options { grid-template-columns: 1fr; } }

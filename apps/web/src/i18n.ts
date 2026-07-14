@@ -24,6 +24,12 @@ const zh: Record<string,string> = {
   'Previous page':'上一页','Next page':'下一页','Loading...':'加载中...','directory':'目录','members':'个成员','confidence':'置信度','Media library':'媒体库','Adding source...':'正在添加数据源...','The API is unavailable':'API 不可用','Start the API to manage sources.':'请启动 API 后管理数据源。','indexed count pending':'索引数量待更新',
   'files':'个文件','groups':'个文件组','sources':'数据源','workflows':'工作流','plans':'计划','batches':'执行批次','of':'共',
   'succeeded':'成功','failed operations':'失败','skipped':'跳过','operations':'项操作','successful operations':'项成功操作','reversible':'项可回滚操作','ready':'就绪','conflict':'冲突','BATCH':'批次',
+  'FILE ORGANIZATION':'文件整理','Build an organization workflow':'创建整理流程','Choose what you want to change. A preview is required before any real file is touched.':'选择需要处理的内容。修改真实文件前必须先生成预览。','Simple':'简单模式','Advanced':'高级模式',
+  'Choose the folder to process':'选择要处理的文件夹','Only indexed metadata is used until you confirm a final plan.':'确认最终计划前，只使用已索引的元数据。','Add and scan a source before building a workflow.':'请先添加并扫描一个数据源。',
+  'Choose the result':'选择整理结果','Start with rename only. Folder organization may require review when a file type is unknown.':'建议先使用仅改名。遇到未知文件类型时，分类整理可能需要人工审核。','Rename files only':'仅修改文件名','Clean names without moving files.':'清理名称，但不移动文件。','Rename and organize':'改名并分类整理','Clean names and place known types into folders.':'清理名称，并将已知类型放入对应文件夹。',
+  'Choose what to detect and clean':'选择需要识别和清理的内容','Recommended options are enabled. Turn off anything you do not need.':'推荐功能已启用，可以关闭不需要的项目。','Clean file names':'清理文件名','Remove extra spaces and normalize separators.':'删除多余空格并规范分隔符。','Recognize file details':'识别文件信息','Detect dates, identifiers, episodes, quality, language and file type.':'识别日期、编号、集数、清晰度、语言和文件类型。','Flag junk candidates':'标记垃圾候选','Mark temporary and incomplete downloads for review.':'标记临时文件和未完成下载，等待审核。',
+  'Prefixes to remove':'需要移除的前缀','Example: [WEB], SAMPLE_':'例如：[WEB], SAMPLE_','Convert dots and underscores to spaces':'将点号和下划线转换为空格','Generate a safe preview':'生成安全预览','You will review before and after paths on the next screen.':'下一页将显示处理前后的路径对比。','Rename only':'仅改名','feature groups selected · no real file changes':'项功能已选择 · 不会修改真实文件','Generating preview...':'正在生成预览...','Save and generate preview':'保存并生成预览','Preview generated; real files are unchanged':'预览已生成，真实文件未修改',
+  'Advanced configuration':'高级配置','Import or export workflow JSON':'导入或导出工作流 JSON',
 }
 
 export const messages = {
