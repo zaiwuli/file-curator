@@ -66,6 +66,9 @@ class ScanJob(Base, TimestampMixin):
     mode: Mapped[str] = mapped_column(String(16), default="full")
     hash_contents: Mapped[bool] = mapped_column(Boolean, default=False)
     inspect_small_text: Mapped[bool] = mapped_column(Boolean, default=False)
+    post_workflow_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflows.id", ondelete="SET NULL")
+    )
     scanned_count: Mapped[int] = mapped_column(Integer, default=0)
     error_count: Mapped[int] = mapped_column(Integer, default=0)
     cursor: Mapped[str | None] = mapped_column(Text)
@@ -212,6 +215,10 @@ class Schedule(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(200))
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"))
+    workflow_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workflows.id", ondelete="SET NULL")
+    )
+    generate_preview: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     interval_minutes: Mapped[int] = mapped_column(Integer, default=1440)
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

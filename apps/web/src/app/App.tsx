@@ -31,6 +31,6 @@ export function App() {
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 
     {page==='history'&&<HistoryPage {...common} history={workspace.history} batches={workspace.batches} backups={workspace.backups}/>}
-    {page==='settings'&&<SettingsPage {...common} locale={locale} setLocale={setLocale} sources={workspace.apiSources} schedules={workspace.schedules} diagnostics={workspace.diagnostics}/>}
+    {page==='settings'&&<SettingsPage {...common} locale={locale} setLocale={setLocale} sources={workspace.apiSources} workflows={workspace.workflows} schedules={workspace.schedules} diagnostics={workspace.diagnostics}/>}
   </div></main>{toast&&<div className="toast">{toast}</div>}</div>
 }

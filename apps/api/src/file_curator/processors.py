@@ -280,6 +280,8 @@ class JunkDetector(Processor):
             "extensions": {"type": "array", "items": {"type": "string"}},
             "filename_contains": {"type": "array", "items": {"type": "string"}},
             "protected_extensions": {"type": "array", "items": {"type": "string"}},
+            "require_hash_evidence": {"type": "boolean", "default": False},
+            "require_small_text": {"type": "boolean", "default": False},
         },
     )
     defaults = {".tmp", ".part", ".download", ".crdownload"}
@@ -334,19 +336,33 @@ class DuplicateDetector(Processor):
         provides=("duplicate_candidate", "duplicate_count"),
         score_weight=0.2,
         safety_class="review",
-        option_schema={"minimum_count": {"type": "integer", "default": 2}},
+        option_schema={
+            "method": {
+                "type": "string",
+                "enum": ["name_size", "normalized_name_size", "hash"],
+                "default": "normalized_name_size",
+            },
+            "minimum_count": {"type": "integer", "default": 2},
+        },
     )
 
     def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
-        count = int(context.fields.get("hash_duplicate_count", 0))
+        method = str(options.get("method", "normalized_name_size"))
+        if method not in {"name_size", "normalized_name_size", "hash"}:
+            return ProcessorResult(status="warning", warnings=["duplicate.method_invalid"])
+        count = int(context.fields.get(f"{method}_duplicate_count", 0))
         minimum = max(2, int(options.get("minimum_count", 2)))
         if count < minimum:
             return ProcessorResult(status="skipped")
         return ProcessorResult(
             status="review",
             confidence_delta=self.manifest.score_weight,
-            fields={"duplicate_candidate": True, "duplicate_count": count},
-            reasons=["duplicate.hash_group_matched"],
+            fields={
+                "duplicate_candidate": True,
+                "duplicate_count": count,
+                "duplicate_method": method,
+            },
+            reasons=[f"duplicate.{method}_group_matched"],
             warnings=["duplicate.review_required"],
         )
 

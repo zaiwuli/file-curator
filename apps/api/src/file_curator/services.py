@@ -150,9 +150,18 @@ def run_pipeline(
     if template:
         entries = [entry for entry in entries if _entry_in_scope(entry, template.scope)]
     hash_groups: dict[str, list[FileEntry]] = {}
+    name_size_groups: dict[tuple[str, int], list[FileEntry]] = {}
+    normalized_name_size_groups: dict[tuple[str, int], list[FileEntry]] = {}
     for entry in entries:
         if entry.content_hash:
             hash_groups.setdefault(entry.content_hash, []).append(entry)
+        name_size_groups.setdefault((entry.name.casefold(), entry.size), []).append(entry)
+        normalized_name = "".join(
+            character
+            for character in Path(entry.name).stem.casefold()
+            if character.isalnum()
+        )
+        normalized_name_size_groups.setdefault((normalized_name, entry.size), []).append(entry)
     changed = review = 0
     for entry in entries:
         context = ProcessingContext(
@@ -166,6 +175,22 @@ def run_pipeline(
             fields={
                 "text_signals": entry.text_signals,
                 "hash_duplicate_count": len(hash_groups.get(entry.content_hash or "", [])),
+                "name_size_duplicate_count": len(
+                    name_size_groups.get((entry.name.casefold(), entry.size), [])
+                ),
+                "normalized_name_size_duplicate_count": len(
+                    normalized_name_size_groups.get(
+                        (
+                            "".join(
+                                character
+                                for character in Path(entry.name).stem.casefold()
+                                if character.isalnum()
+                            ),
+                            entry.size,
+                        ),
+                        [],
+                    )
+                ),
                 "hash_directory_count": len({
                     item.parent_path
                     for item in hash_groups.get(entry.content_hash or "", [])

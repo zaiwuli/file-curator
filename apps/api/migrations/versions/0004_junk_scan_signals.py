@@ -14,10 +14,21 @@ depends_on = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("scan_jobs") as batch:
-        batch.add_column(sa.Column("inspect_small_text", sa.Boolean(), nullable=False, server_default=sa.false()))
-    with op.batch_alter_table("file_entries") as batch:
-        batch.add_column(sa.Column("text_signals", sa.JSON(), nullable=False, server_default="[]"))
+    inspector = sa.inspect(op.get_bind())
+    scan_columns = {column["name"] for column in inspector.get_columns("scan_jobs")}
+    entry_columns = {column["name"] for column in inspector.get_columns("file_entries")}
+    if "inspect_small_text" not in scan_columns:
+        op.add_column(
+            "scan_jobs",
+            sa.Column(
+                "inspect_small_text", sa.Boolean(), nullable=False, server_default=sa.false()
+            ),
+        )
+    if "text_signals" not in entry_columns:
+        op.add_column(
+            "file_entries",
+            sa.Column("text_signals", sa.JSON(), nullable=False, server_default="[]"),
+        )
 
 
 def downgrade() -> None:

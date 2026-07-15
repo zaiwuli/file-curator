@@ -535,6 +535,8 @@ class DiagnosticsRead(BaseModel):
 class ScheduleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     source_id: str
+    workflow_id: str | None = None
+    generate_preview: bool = False
     interval_minutes: int = Field(default=1440, ge=1, le=525_600)
     enabled: bool = True
 
@@ -543,12 +545,16 @@ class ScheduleUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     interval_minutes: int | None = Field(default=None, ge=1, le=525_600)
     enabled: bool | None = None
+    workflow_id: str | None = None
+    generate_preview: bool | None = None
 
 
 class ScheduleRead(ORMModel):
     id: str
     name: str
     source_id: str
+    workflow_id: str | None
+    generate_preview: bool
     interval_minutes: int
     enabled: bool
     next_run_at: datetime

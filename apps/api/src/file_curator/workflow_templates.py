@@ -171,6 +171,36 @@ def processors_from_template(template: WorkflowTemplateV2) -> list[ProcessorConf
     return processors
 
 
+def scan_requirements(template: WorkflowTemplateV2) -> dict[str, bool]:
+    processor_options = [
+        action.options
+        for stage in template.stages
+        if stage.enabled
+        for rule in stage.rules
+        if rule.enabled
+        for action in rule.actions
+        if action.kind == "run_processor"
+    ]
+    return {
+        "hash_contents": any(
+            (
+                options.get("processor_id") == "detect_duplicates"
+                and options.get("method", "normalized_name_size") == "hash"
+            )
+            or (
+                options.get("processor_id") == "detect_junk"
+                and bool(options.get("require_hash_evidence"))
+            )
+            for options in processor_options
+        ),
+        "inspect_small_text": any(
+            options.get("processor_id") == "detect_junk"
+            and bool(options.get("require_small_text"))
+            for options in processor_options
+        ),
+    }
+
+
 def template_from_revision(name: str, preset: str, review_policy: str, config: dict[str, Any]) -> WorkflowTemplateV2:
     if "template" in config:
         return WorkflowTemplateV2.model_validate(config["template"])
@@ -230,7 +260,7 @@ def builtin_templates() -> list[WorkflowTemplateV2]:
     )
     duplicate_detect = RuleCard(
         id="classify.duplicates", name="Detect indexed duplicate groups",
-        actions=[WorkflowAction(kind="run_processor", options={"processor_id": "detect_duplicates"})],
+        actions=[WorkflowAction(kind="run_processor", options={"processor_id": "detect_duplicates", "method": "hash"})],
     )
     return [
         WorkflowTemplateV2(name="Clean file names", description="Normalize names without moving files.", stages=stages(("clean", clean))),

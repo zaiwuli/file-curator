@@ -4,7 +4,14 @@ from fastapi.testclient import TestClient
 
 from file_curator.junk_rules import DEFAULT_JUNK_PACK, evaluate_junk
 from file_curator.processors import ProcessingContext
-from file_curator.schemas import WorkflowTemplateV2
+from file_curator.schemas import (
+    Condition,
+    ConditionGroup,
+    RuleCard,
+    WorkflowAction,
+    WorkflowStage,
+    WorkflowTemplateV2,
+)
 from file_curator.workflow_templates import dump_template
 
 
@@ -226,3 +233,88 @@ def test_duplicate_review_template_uses_hash_groups(
     reviews = client.get("/api/reviews", params={"run_id": run["id"]}).json()
     assert len(reviews) == 2
     assert all("duplicate.hash_group_matched" in item["reasons"] for item in reviews)
+
+
+def test_duplicate_detector_supports_normalized_name_and_reports_hash_readiness(
+    client: TestClient, media_root: Path
+) -> None:
+    (media_root / "A-B.mp4").write_bytes(b"one")
+    (media_root / "ab.mp4").write_bytes(b"two")
+    source = client.post(
+        "/api/sources", json={"name": "Duplicate methods", "root_path": str(media_root)}
+    ).json()
+    scan = client.post("/api/scans", json={"source_id": source["id"]}).json()
+    for _ in range(100):
+        if client.get(f"/api/scans/{scan['id']}").json()["status"] == "completed":
+            break
+        __import__("time").sleep(0.02)
+    template = WorkflowTemplateV2(
+        name="Normalized duplicate review",
+        stages=[
+            WorkflowStage(
+                id="classify",
+                rules=[
+                    RuleCard(
+                        id="classify.duplicates",
+                        name="Detect duplicates",
+                        actions=[
+                            WorkflowAction(
+                                kind="run_processor",
+                                options={
+                                    "processor_id": "detect_duplicates",
+                                    "method": "normalized_name_size",
+                                },
+                            )
+                        ],
+                    )
+                ],
+            ),
+            WorkflowStage(
+                id="review",
+                rules=[
+                    RuleCard(
+                        id="review.duplicates",
+                        name="Review duplicates",
+                        conditions=ConditionGroup(
+                            conditions=[
+                                Condition(field="duplicate_candidate", operator="is_true")
+                            ]
+                        ),
+                        actions=[WorkflowAction(kind="require_review")],
+                    )
+                ],
+            ),
+        ],
+    )
+    workflow = client.post(
+        "/api/workflow-templates/import",
+        json={"content": dump_template(template, "json"), "format": "json"},
+    ).json()
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source["id"], "workflow_id": workflow["id"]},
+    ).json()
+    reviews = client.get("/api/reviews", params={"run_id": run["id"]}).json()
+    assert len(reviews) == 2
+    assert all(
+        "duplicate.normalized_name_size_group_matched" in item["reasons"]
+        for item in reviews
+    )
+
+    template.stages[0].rules[0].actions[0].options["method"] = "hash"
+    hash_workflow = client.post(
+        "/api/workflow-templates/import",
+        json={"content": dump_template(template, "json"), "format": "json"},
+    ).json()
+    dependencies = client.get(
+        f"/api/workflows/{hash_workflow['id']}/dependencies",
+        params={"source_id": source["id"]},
+    ).json()
+    assert dependencies == [
+        {
+            "feature": "hash_duplicate_detection",
+            "requires": ["hash_contents_scan"],
+            "satisfied": False,
+            "message": "Run a content-hash scan before hash duplicate evidence is available.",
+        }
+    ]

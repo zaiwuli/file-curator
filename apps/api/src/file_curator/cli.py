@@ -19,6 +19,9 @@ def detect_unstamped_revision(database_url: str) -> str | None:
         if "alembic_version" in tables or "sources" not in tables:
             return None
         scan_columns = {column["name"] for column in inspector.get_columns("scan_jobs")}
+        schedule_columns = {column["name"] for column in inspector.get_columns("schedules")}
+        if "post_workflow_id" in scan_columns and "generate_preview" in schedule_columns:
+            return "0005_scheduled_workflow_previews"
         if "review_decisions" in tables and "hash_contents" in scan_columns:
             return "0004_junk_scan_signals"
         if "review_decisions" in tables:

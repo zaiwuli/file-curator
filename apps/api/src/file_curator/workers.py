@@ -4,9 +4,17 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 
 from .config import Settings
-from .db import Database, ExecutionBatch, ScanJob, Schedule, Source
+from .db import Database, ExecutionBatch, ScanJob, Schedule, Source, Workflow
 from .filesystem import scan_source
-from .services import DomainError, execute_batch
+from .processors import create_default_registry
+from .services import (
+    DomainError,
+    create_plan_from_pipeline,
+    execute_batch,
+    get_revision,
+    run_pipeline,
+)
+from .workflow_templates import scan_requirements, template_from_revision
 
 
 class WorkerService:
@@ -81,6 +89,17 @@ class WorkerService:
                 .all()
             )
             for schedule in due:
+                requirements = {"hash_contents": False, "inspect_small_text": False}
+                if schedule.generate_preview and schedule.workflow_id:
+                    workflow = session.get(Workflow, schedule.workflow_id)
+                    if workflow:
+                        template = template_from_revision(
+                            workflow.name,
+                            workflow.preset,
+                            workflow.review_policy,
+                            get_revision(session, workflow).config,
+                        )
+                        requirements = scan_requirements(template)
                 active = (
                     session.query(ScanJob)
                     .filter(
@@ -91,7 +110,16 @@ class WorkerService:
                 )
                 if not active:
                     session.add(
-                        ScanJob(source_id=schedule.source_id, mode="incremental", status="queued")
+                        ScanJob(
+                            source_id=schedule.source_id,
+                            mode="incremental",
+                            status="queued",
+                            hash_contents=requirements["hash_contents"],
+                            inspect_small_text=requirements["inspect_small_text"],
+                            post_workflow_id=(
+                                schedule.workflow_id if schedule.generate_preview else None
+                            ),
+                        )
                     )
                 schedule.last_run_at = now
                 schedule.next_run_at = now + timedelta(minutes=schedule.interval_minutes)
@@ -126,6 +154,13 @@ class WorkerService:
 
             try:
                 scan_source(session, source, job, self.settings.max_scan_entries, control)
+                if job.status == "completed" and job.post_workflow_id:
+                    workflow = session.get(Workflow, job.post_workflow_id)
+                    if workflow:
+                        run = run_pipeline(
+                            session, source, workflow, create_default_registry()
+                        )
+                        create_plan_from_pipeline(session, run)
             except Exception as exc:
                 job.status = "failed"
                 job.error_count += 1

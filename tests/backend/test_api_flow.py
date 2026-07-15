@@ -1,5 +1,5 @@
-import time
 import sqlite3
+import time
 from pathlib import Path
 
 
@@ -126,6 +126,29 @@ def test_schedule_and_duplicate_candidates(client, media_root: Path) -> None:
     )
     assert schedule.status_code == 201
     schedule_id = schedule.json()["id"]
+    assert schedule.json()["generate_preview"] is False
+    workflow = client.post(
+        "/api/workflows",
+        json={"name": "Scheduled preview", "processors": [{"id": "normalize_name"}]},
+    ).json()
+    preview_schedule = client.post(
+        "/api/schedules",
+        json={
+            "name": "Nightly preview",
+            "source_id": source_id,
+            "workflow_id": workflow["id"],
+            "generate_preview": True,
+            "interval_minutes": 60,
+        },
+    )
+    assert preview_schedule.status_code == 201, preview_schedule.text
+    assert preview_schedule.json()["workflow_id"] == workflow["id"]
+    invalid = client.post(
+        "/api/schedules",
+        json={"name": "Invalid preview", "source_id": source_id, "generate_preview": True},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "schedule.workflow_required"
     updated = client.patch(f"/api/schedules/{schedule_id}", json={"enabled": False})
     assert updated.json()["enabled"] is False
     assert client.delete(f"/api/schedules/{schedule_id}").status_code == 204
@@ -230,7 +253,14 @@ def test_file_browser_groups_and_workflow_portability(client, media_root: Path) 
     assert comparison["added"] == ["normalize_name"]
     assert comparison["unchanged"] == ["extract_sequence"]
 
+    restored = client.post(f"/api/workflows/{workflow['id']}/restore/1")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["current_revision"] == 3
+    revisions = client.get(f"/api/workflows/{workflow['id']}/revisions").json()
+    assert [item["revision"] for item in revisions] == [3, 2, 1]
+
     exported = client.get(f"/api/workflows/{workflow['id']}/export").json()
+    assert [item["id"] for item in exported["processors"]] == ["extract_sequence"]
     exported["name"] = "Imported copy"
     imported = client.post("/api/workflows/import", json=exported)
     assert imported.status_code == 201, imported.text

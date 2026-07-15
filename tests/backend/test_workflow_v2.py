@@ -332,9 +332,12 @@ def test_workflow_dependencies_and_impact_threshold(client: TestClient, media_ro
     )))
     template.impact_threshold.max_operations = 1
     values = import_and_run(client, source_id, template)
-    deps = client.get(f"/api/workflows/{values['workflow']['id']}/dependencies")
+    deps = client.get(
+        f"/api/workflows/{values['workflow']['id']}/dependencies",
+        params={"source_id": source_id},
+    )
     assert deps.status_code == 200
-    assert any(item["feature"] == "render_dates" and not item["satisfied"] for item in deps.json())
+    assert deps.json() == []
     plan = client.post("/api/plans", json={"run_id": values["run"]["id"]}).json()
     assert client.post(f"/api/plans/{plan['id']}/freeze").json()["status"] == "frozen"
 
@@ -353,3 +356,25 @@ def test_associated_sidecar_follows_main_file(client: TestClient, media_root: Pa
     targets = {item["target_relative_path"] for item in plan["operations"]}
     assert "renamed.mp4" in targets
     assert "renamed.srt" in targets
+
+
+def test_v2_revision_comparison_includes_scope_and_rules(client: TestClient) -> None:
+    template = template_with(("clean", RuleCard(
+        id="clean.names", name="Clean names", actions=[WorkflowAction(kind="clean_name")]
+    )))
+    workflow = client.post(
+        "/api/workflow-templates/import",
+        json={"content": dump_template(template, "json"), "format": "json"},
+    ).json()
+    template.scope.max_depth = 2
+    template.stages[3].rules[0].actions[0].options["normalize_separators"] = True
+    updated = client.put(
+        f"/api/workflow-templates/{workflow['id']}", json={"template": template.model_dump(mode="json")}
+    )
+    assert updated.status_code == 200, updated.text
+    comparison = client.get(
+        f"/api/workflows/{workflow['id']}/compare",
+        params={"from_revision": 1, "to_revision": 2},
+    ).json()
+    assert "settings:scope" in comparison["changed"]
+    assert "rule:clean:clean.names" in comparison["changed"]

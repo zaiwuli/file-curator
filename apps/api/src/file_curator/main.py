@@ -2,6 +2,7 @@ import os
 import re
 import secrets
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -104,6 +105,7 @@ from .workflow_templates import (
     dump_template,
     parse_template_text,
     processors_from_template,
+    scan_requirements,
     template_from_revision,
     validate_template,
 )
@@ -405,17 +407,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/workflows/{workflow_id}/dependencies", response_model=list[WorkflowDependency])
-    def workflow_dependencies(workflow_id: str, session: Session = Depends(session_dependency)):
+    def workflow_dependencies(
+        workflow_id: str,
+        source_id: str | None = None,
+        session: Session = Depends(session_dependency),
+    ):
         workflow = require(Workflow, workflow_id, session)
         template = template_from_revision(workflow.name, workflow.preset, workflow.review_policy, get_revision(session, workflow).config)
-        actions = {action.kind for stage in template.stages for rule in stage.rules if rule.enabled for action in rule.actions}
-        dependencies = [
-            {"feature": "archive_by_date", "requires": ["extract_dates"], "satisfied": "extract_dates" in actions, "message": "Date archive needs multi-date extraction."},
-            {"feature": "render_dates", "requires": ["extract_dates"], "satisfied": "extract_dates" in actions, "message": "Name templates using dates need date extraction."},
-            {"feature": "number_cleanup", "requires": ["extract_dates", "extract_identifier", "extract_sequence"], "satisfied": any(value in actions for value in ("extract_dates", "extract_identifier", "extract_sequence")), "message": "Number cleanup needs protected metadata first."},
-            {"feature": "hash_duplicate_detection", "requires": ["hash_contents_scan"], "satisfied": False, "message": "Run a hash scan before repeated-file evidence is available."},
-            {"feature": "small_text_detection", "requires": ["inspect_small_text_scan"], "satisfied": False, "message": "Enable small-text inspection before text signals are available."},
+        enabled_actions = [
+            action
+            for stage in template.stages
+            if stage.enabled
+            for rule in stage.rules
+            if rule.enabled
+            for action in rule.actions
         ]
+        actions = {action.kind for action in enabled_actions}
+        dependencies: list[dict[str, Any]] = []
+        archive_uses_dates = any(
+            action.kind == "archive"
+            and any(
+                field in str(action.options.get("path_template", ""))
+                for field in ("{year}", "{month}", "{day}")
+            )
+            for action in enabled_actions
+        )
+        if archive_uses_dates:
+            dependencies.append({"feature": "archive_by_date", "requires": ["extract_dates"], "satisfied": "extract_dates" in actions, "message": "Date archive needs multi-date extraction."})
+        render_uses_dates = any(
+            action.kind == "render_name"
+            and "{dates}" in str(action.options.get("name_template", ""))
+            for action in enabled_actions
+        )
+        if render_uses_dates:
+            dependencies.append({"feature": "render_dates", "requires": ["extract_dates"], "satisfied": "extract_dates" in actions, "message": "Name templates using dates need date extraction."})
+        if "remove_number_patterns" in actions:
+            dependencies.append({"feature": "number_cleanup", "requires": ["extract_dates", "extract_identifier", "extract_sequence"], "satisfied": any(value in actions for value in ("extract_dates", "extract_identifier", "extract_sequence")), "message": "Number cleanup needs protected metadata first."})
+
+        requirements = scan_requirements(template)
+        hash_required = requirements["hash_contents"]
+        text_required = requirements["inspect_small_text"]
+        hash_ready = text_ready = False
+        if source_id:
+            require(Source, source_id, session)
+            completed_scans = session.query(ScanJob).filter_by(
+                source_id=source_id, status="completed"
+            )
+            hash_ready = completed_scans.filter(ScanJob.hash_contents.is_(True)).first() is not None
+            text_ready = completed_scans.filter(ScanJob.inspect_small_text.is_(True)).first() is not None
+        if hash_required:
+            dependencies.append({"feature": "hash_duplicate_detection", "requires": ["hash_contents_scan"], "satisfied": hash_ready, "message": "Run a content-hash scan before hash duplicate evidence is available."})
+        if text_required:
+            dependencies.append({"feature": "small_text_detection", "requires": ["inspect_small_text_scan"], "satisfied": text_ready, "message": "Run small-text inspection before text signals are available."})
         return dependencies
 
     @app.post("/api/sources", response_model=SourceRead, status_code=201)
@@ -670,13 +713,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         by_number = {revision.revision: revision for revision in revisions}
         if from_revision not in by_number or to_revision not in by_number:
             raise HTTPException(404, detail="workflow.revision_not_found")
-        before = {
-            item["id"]: item
-            for item in by_number[from_revision].config.get("processors", [])
-        }
-        after = {
-            item["id"]: item for item in by_number[to_revision].config.get("processors", [])
-        }
+        def comparable_items(item: WorkflowRevision) -> dict[str, Any]:
+            template_data = item.config.get("template")
+            if not isinstance(template_data, dict):
+                return {
+                    processor["id"]: processor
+                    for processor in item.config.get("processors", [])
+                }
+            values: dict[str, Any] = {
+                "settings:scope": template_data.get("scope", {}),
+                "settings:association": template_data.get("association_policy", {}),
+                "settings:impact_threshold": template_data.get("impact_threshold", {}),
+                "settings:conflict_policy": template_data.get("conflict_policy"),
+                "settings:review_policy": template_data.get("review_policy"),
+            }
+            for stage in template_data.get("stages", []):
+                values[f"stage:{stage.get('id')}"] = {
+                    "enabled": stage.get("enabled", True)
+                }
+                for rule in stage.get("rules", []):
+                    values[f"rule:{stage.get('id')}:{rule.get('id')}"] = rule
+            return values
+
+        before = comparable_items(by_number[from_revision])
+        after = comparable_items(by_number[to_revision])
         before_ids, after_ids = set(before), set(after)
         shared = before_ids & after_ids
         return {
@@ -688,6 +748,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "changed": sorted(identifier for identifier in shared if before[identifier] != after[identifier]),
             "unchanged": sorted(identifier for identifier in shared if before[identifier] == after[identifier]),
         }
+
+    @app.post("/api/workflows/{workflow_id}/restore/{revision}", response_model=WorkflowRead)
+    def restore_workflow_revision(
+        workflow_id: str,
+        revision: int,
+        session: Session = Depends(session_dependency),
+    ):
+        workflow = require(Workflow, workflow_id, session)
+        selected = session.query(WorkflowRevision).filter_by(
+            workflow_id=workflow.id, revision=revision
+        ).one_or_none()
+        if selected is None:
+            raise DomainError("workflow.revision_not_found", 404)
+        restored = template_from_revision(
+            workflow.name, workflow.preset, workflow.review_policy, selected.config
+        )
+        workflow.current_revision += 1
+        workflow.name = restored.name
+        workflow.preset = restored.preset
+        workflow.review_policy = restored.review_policy
+        session.add(
+            WorkflowRevision(
+                workflow_id=workflow.id,
+                revision=workflow.current_revision,
+                config=deepcopy(selected.config),
+            )
+        )
+        stale_runs = select(PipelineRun.id).where(PipelineRun.workflow_id == workflow.id)
+        session.query(Plan).filter(
+            Plan.run_id.in_(stale_runs), Plan.status == "draft"
+        ).update({"status": "invalidated"}, synchronize_session=False)
+        session.commit()
+        return workflow
 
     @app.post("/api/workflows/{workflow_id}/impact", response_model=WorkflowImpactSummary)
     def workflow_impact(
@@ -1036,9 +1129,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/schedules", response_model=ScheduleRead, status_code=201)
     def create_schedule(payload: ScheduleCreate, session: Session = Depends(session_dependency)):
         require(Source, payload.source_id, session)
+        if payload.workflow_id:
+            require(Workflow, payload.workflow_id, session)
+        if payload.generate_preview and not payload.workflow_id:
+            raise DomainError("schedule.workflow_required")
         schedule = Schedule(
             name=payload.name,
             source_id=payload.source_id,
+            workflow_id=payload.workflow_id,
+            generate_preview=payload.generate_preview,
             enabled=payload.enabled,
             interval_minutes=payload.interval_minutes,
             next_run_at=datetime.now(UTC) + timedelta(minutes=payload.interval_minutes),
@@ -1058,6 +1157,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session: Session = Depends(session_dependency),
     ):
         schedule = require(Schedule, schedule_id, session)
+        if payload.workflow_id:
+            require(Workflow, payload.workflow_id, session)
+        next_workflow_id = (
+            payload.workflow_id if "workflow_id" in payload.model_fields_set else schedule.workflow_id
+        )
+        next_generate_preview = (
+            payload.generate_preview
+            if payload.generate_preview is not None
+            else schedule.generate_preview
+        )
+        if next_generate_preview and not next_workflow_id:
+            raise DomainError("schedule.workflow_required")
         for key, value in payload.model_dump(exclude_unset=True).items():
             setattr(schedule, key, value)
         if payload.interval_minutes is not None:

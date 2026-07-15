@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCompare, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -60,6 +60,8 @@ export const api = {
   exportWorkflow: (id: string) => request<WorkflowPortable>(`/workflows/${id}/export`),
   importWorkflow: (payload: WorkflowPortable) => post<Workflow>('/workflows/import', payload),
   compareWorkflow: (id: string, from: number, to: number) => request<WorkflowCompare>(`/workflows/${id}/compare?from_revision=${from}&to_revision=${to}`),
+  workflowDependencies: (id:string, sourceId?:string) => request<WorkflowDependency[]>(`/workflows/${id}/dependencies${sourceId?`?source_id=${encodeURIComponent(sourceId)}`:''}`),
+  restoreWorkflowRevision: (id:string, revision:number) => post<Workflow>(`/workflows/${id}/restore/${revision}`),
   runPipeline: (source_id: string, workflow_id: string) => post<PipelineRun>('/pipeline-runs', { source_id, workflow_id }),
   trace: (runId: string) => request<StageResult[]>(`/pipeline-runs/${runId}/trace`),
   decideReview: (runId: string, fileEntryId: string, payload: { action: 'accept'|'keep'|'override'; target_relative_path?: string; note?: string }) => request<ReviewDecision>(`/reviews/${runId}/${fileEntryId}`, { method: 'PUT', body: JSON.stringify(payload) }),
@@ -71,8 +73,8 @@ export const api = {
   batchAction: (id: string, action: 'pause'|'cancel'|'retry'|'rollback') => post<Batch>(`/batches/${id}/${action}`),
   rollbackPreview: (id: string) => request<RollbackPreview>(`/batches/${id}/rollback-preview`),
   backup: () => post<{ status: string; filename: string }>('/backups'),
-  createSchedule: (payload: { name: string; source_id: string; interval_minutes: number; enabled: boolean }) => post<Schedule>('/schedules', payload),
-  updateSchedule: (id: string, payload: Partial<Pick<Schedule,'name'|'interval_minutes'|'enabled'>>) => request<Schedule>(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  createSchedule: (payload: { name: string; source_id: string; workflow_id?:string|null; generate_preview?:boolean; interval_minutes: number; enabled: boolean }) => post<Schedule>('/schedules', payload),
+  updateSchedule: (id: string, payload: Partial<Pick<Schedule,'name'|'interval_minutes'|'enabled'|'workflow_id'|'generate_preview'>>) => request<Schedule>(`/schedules/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteSchedule: (id: string) => request<void>(`/schedules/${id}`, { method: 'DELETE' }),
   downloadBackup: async (filename: string) => {
     const token = window.localStorage.getItem('file-curator.admin-token')

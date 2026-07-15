@@ -98,4 +98,4 @@ def test_detects_unstamped_internal_database(tmp_path: Path) -> None:
     database = cli.Database(database_url)
     database.create_all()
 
-    assert cli.detect_unstamped_revision(database_url) == "0004_junk_scan_signals"
+    assert cli.detect_unstamped_revision(database_url) == "0005_scheduled_workflow_previews"
