@@ -326,6 +326,31 @@ class JunkDetector(Processor):
         )
 
 
+class DuplicateDetector(Processor):
+    manifest = ProcessorManifest(
+        "detect_duplicates",
+        "1.0.0",
+        "detect",
+        provides=("duplicate_candidate", "duplicate_count"),
+        score_weight=0.2,
+        safety_class="review",
+        option_schema={"minimum_count": {"type": "integer", "default": 2}},
+    )
+
+    def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
+        count = int(context.fields.get("hash_duplicate_count", 0))
+        minimum = max(2, int(options.get("minimum_count", 2)))
+        if count < minimum:
+            return ProcessorResult(status="skipped")
+        return ProcessorResult(
+            status="review",
+            confidence_delta=self.manifest.score_weight,
+            fields={"duplicate_candidate": True, "duplicate_count": count},
+            reasons=["duplicate.hash_group_matched"],
+            warnings=["duplicate.review_required"],
+        )
+
+
 class LanguageExtractor(Processor):
     manifest = ProcessorManifest(
         "extract_language",
@@ -447,6 +472,7 @@ def create_default_registry() -> ProcessorRegistry:
         NameNormalizer(),
         TemplateTarget(),
         JunkDetector(),
+        DuplicateDetector(),
         LanguageExtractor(),
         SourcePrefixExtractor(),
         ClassificationProcessor(),

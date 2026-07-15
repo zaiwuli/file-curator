@@ -190,3 +190,39 @@ def test_builtin_template_uses_repeated_hash_evidence(
     reviews = client.get("/api/reviews", params={"run_id": run["id"]}).json()
     assert len(reviews) == 3
     assert all("junk.repeated.hash" in item["reasons"] for item in reviews)
+
+
+def test_duplicate_review_template_uses_hash_groups(
+    client: TestClient, media_root: Path
+) -> None:
+    (media_root / "a.mp4").write_bytes(b"same-content")
+    (media_root / "b.mp4").write_bytes(b"same-content")
+    source = client.post(
+        "/api/sources", json={"name": "Duplicate fixture", "root_path": str(media_root)}
+    ).json()
+    scan = client.post(
+        "/api/scans", json={"source_id": source["id"], "hash_contents": True}
+    ).json()
+    for _ in range(100):
+        current = client.get(f"/api/scans/{scan['id']}").json()
+        if current["status"] == "completed":
+            break
+        __import__("time").sleep(0.02)
+    template = next(
+        item for item in client.get("/api/workflow-templates").json()
+        if item["name"] == "Duplicate file review"
+    )
+    workflow = client.post(
+        "/api/workflow-templates/import",
+        json={
+            "content": dump_template(WorkflowTemplateV2.model_validate(template), "json"),
+            "format": "json",
+        },
+    ).json()
+    run = client.post(
+        "/api/pipeline-runs",
+        json={"source_id": source["id"], "workflow_id": workflow["id"]},
+    ).json()
+    reviews = client.get("/api/reviews", params={"run_id": run["id"]}).json()
+    assert len(reviews) == 2
+    assert all("duplicate.hash_group_matched" in item["reasons"] for item in reviews)

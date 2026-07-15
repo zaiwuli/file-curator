@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 
 const zh: Record<string,string> = {
+  'Review duplicate files':'\u5ba1\u6838\u91cd\u590d\u6587\u4ef6','Detect duplicate groups':'\u68c0\u6d4b\u91cd\u590d\u6587\u4ef6\u7ec4','Detect duplicate files':'\u68c0\u6d4b\u91cd\u590d\u6587\u4ef6','Detect junk and advertisements':'\u68c0\u6d4b\u5783\u573e\u548c\u5e7f\u544a','Detect indexed duplicate groups and send candidates to review.':'\u68c0\u6d4b\u5df2\u7d22\u5f15\u7684\u91cd\u590d\u6587\u4ef6\u7ec4\uff0c\u5e76\u5c06\u5019\u9009\u6587\u4ef6\u9001\u5165\u5ba1\u6838\u3002',
   'Dashboard':'仪表盘','Sources':'数据源','File browser':'文件浏览器','Pipeline':'处理流程','Review center':'审核中心','Virtual preview':'虚拟预览','Execution':'执行','History':'历史记录','Settings':'设置',
   'Workspace':'工作区','Local library':'本地文件库','Local-first workbench':'本地文件工作台','Safe mode':'安全模式','Frozen plan required':'必须冻结计划','API connected':'API 已连接','Connecting to API':'正在连接 API','API unavailable':'API 不可用','Switch to Chinese':'切换到中文','Switch to English':'切换到英文',
   'Workspace overview':'工作区概览','Review indexed metadata and virtual plans before touching any files.':'在更改文件前审核索引元数据和虚拟计划。','Add source':'添加数据源','Preview plan':'预览计划','Data mode':'数据模式','Metadata':'元数据','Real files remain unchanged':'真实文件保持不变','Safety boundary':'安全边界','Frozen plan':'冻结计划','Confirmation required':'需要确认','Workflows':'工作流','Plans':'计划','ACTIVE WORKFLOW':'当前工作流','Create your first workflow':'创建第一个工作流','Simulation only until a plan is frozen and confirmed':'计划冻结并确认前仅进行模拟','Configure workflow':'配置工作流',

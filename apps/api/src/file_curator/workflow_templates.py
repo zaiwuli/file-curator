@@ -228,6 +228,10 @@ def builtin_templates() -> list[WorkflowTemplateV2]:
         conditions=ConditionGroup(conditions=[Condition(field="duplicate_candidate", operator="is_true")]),
         actions=[WorkflowAction(kind="require_review")],
     )
+    duplicate_detect = RuleCard(
+        id="classify.duplicates", name="Detect indexed duplicate groups",
+        actions=[WorkflowAction(kind="run_processor", options={"processor_id": "detect_duplicates"})],
+    )
     return [
         WorkflowTemplateV2(name="Clean file names", description="Normalize names without moving files.", stages=stages(("clean", clean))),
         WorkflowTemplateV2(name="Archive by year and month", description="Extract dates and archive within the source.", preset="rename_and_organize", stages=stages(("extract", dates), ("target", archive))),
@@ -236,5 +240,5 @@ def builtin_templates() -> list[WorkflowTemplateV2]:
         WorkflowTemplateV2(name="Media organization", description="Classify and organize common media and sidecar files.", preset="rename_and_organize", stages=stages(("classify", media_classify), ("clean", clean), ("target", media_target))),
         WorkflowTemplateV2(name="Downloads cleanup", description="Clean download names and review incomplete files.", stages=stages(("classify", junk_detect), ("clean", clean), ("target", quarantine))),
         WorkflowTemplateV2(name="Ads and temporary file quarantine", description="Detect BT advertisements and quarantine candidates for review.", stages=stages(("classify", junk_detect), ("target", quarantine))),
-        WorkflowTemplateV2(name="Duplicate file review", description="Send indexed duplicate candidates to review.", stages=stages(("review", duplicates))),
+        WorkflowTemplateV2(name="Duplicate file review", description="Detect indexed duplicate groups and send candidates to review.", stages=stages(("classify", duplicate_detect), ("review", duplicates))),
     ]

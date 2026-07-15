@@ -292,6 +292,22 @@ def test_workflow_diagnostics_find_missing_dependencies(client: TestClient) -> N
     assert "workflow.numbers_unprotected" in codes
 
 
+def test_duplicate_review_diagnostic_requires_detector(client: TestClient) -> None:
+    template = template_with(("review", RuleCard(
+        id="review.items", name="Review selected candidates",
+        conditions=ConditionGroup(
+            conditions=[Condition(field="duplicate_candidate", operator="is_true")]
+        ),
+        actions=[WorkflowAction(kind="require_review")],
+    )))
+    result = client.post(
+        "/api/workflow-templates/diagnostics", json=template.model_dump(mode="json")
+    ).json()
+    assert "workflow.duplicate_review_missing_detector" in {
+        item["code"] for item in result["diagnostics"]
+    }
+
+
 def test_workflow_scope_filters_nested_and_extensions(client: TestClient, media_root: Path) -> None:
     (media_root / "top.mp4").write_text("top")
     nested = media_root / "nested"
