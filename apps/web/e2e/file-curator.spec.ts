@@ -153,3 +153,31 @@ test('custom junk and filename cleanup fields are available', async ({ page }) =
   await page.getByRole('button', { name: 'Standard' }).click()
   await expect(page.getByText('Developer options (JSON)')).toHaveCount(0)
 })
+
+test('junk rule library saves manual values to a workflow revision', async ({ page, request }) => {
+  const workflow = await (await request.post('/api/workflows', {
+    data: { name: `E2E junk rules ${Date.now()}`, processors: [] },
+  })).json()
+
+  await page.goto('/')
+  await expect(page.getByText('API connected')).toBeVisible()
+  await page.getByRole('button', { name: 'Junk rules' }).click()
+  await page.getByLabel('Target workflow').selectOption(workflow.id)
+  const keywords = page.getByLabel('Additional junk keywords')
+  await expect(keywords).toBeVisible()
+  await keywords.fill('tracker.example')
+  await keywords.press('Enter')
+  const extensions = page.getByLabel('Additional junk file extensions')
+  await extensions.fill('.ad')
+  await extensions.press('Enter')
+  await page.getByRole('button', { name: 'Save to workflow' }).click()
+  await expect(page.getByText('Junk rules saved to workflow')).toBeVisible()
+
+  await expect.poll(async () => {
+    const response = await request.get(`/api/workflow-templates/${workflow.id}/export?format=json`)
+    const template = await response.json()
+    const actions = template.stages.flatMap((stage: {rules:{actions:{options:Record<string,unknown>}[]}[]}) => stage.rules.flatMap(rule => rule.actions))
+    const options = actions.find((action: {options:Record<string,unknown>}) => action.options.processor_id === 'detect_junk')?.options
+    return options
+  }).toMatchObject({ filename_contains: ['tracker.example'], extensions: ['.ad'] })
+})

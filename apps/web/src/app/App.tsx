@@ -26,7 +26,7 @@ export function App() {
     {page==='sources'&&<SourcesPage notify={notify} data={workspace.sources} state={workspace.state} error={workspace.error} refresh={workspace.refresh}/>} 
     {page==='files'&&<FileBrowserPage sources={workspace.apiSources} notify={notify}/>}
     {page==='pipeline'&&<WorkflowBuilderV2 {...common} sources={workspace.apiSources} workflows={workspace.workflows} openPreview={()=>setPage('preview')}/>}
-    {page==='junk'&&<JunkRulesPage notify={notify}/>}
+    {page==='junk'&&<JunkRulesPage {...common} workflows={workspace.workflows}/>}
     {page==='review'&&<ReviewPage {...common} reviews={workspace.reviews} runs={workspace.runs}/>}
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 
