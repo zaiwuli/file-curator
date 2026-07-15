@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -230,6 +231,24 @@ class ImpactThreshold(BaseModel):
     review_above_operations: int | None = Field(default=None, ge=1)
 
 
+class WorkflowProtectionConfig(BaseModel):
+    protected_paths: list[str] = []
+    protected_extensions: list[str] = []
+    protected_names: list[str] = []
+    protected_keywords: list[str] = []
+    protected_regex: list[str] = []
+
+    @field_validator("protected_regex")
+    @classmethod
+    def valid_regex(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError("workflow.protection_regex_invalid") from exc
+        return values
+
+
 class TemplateExample(BaseModel):
     input_path: str
     expected_path: str | None = None
@@ -248,6 +267,7 @@ class WorkflowTemplateV2(BaseModel):
     scope: WorkflowScopeConfig = WorkflowScopeConfig()
     association_policy: AssociationPolicy = AssociationPolicy()
     impact_threshold: ImpactThreshold = ImpactThreshold()
+    protection: WorkflowProtectionConfig = WorkflowProtectionConfig()
     stages: list[WorkflowStage]
     examples: list[TemplateExample] = []
 

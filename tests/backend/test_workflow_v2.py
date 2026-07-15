@@ -522,3 +522,40 @@ def test_draft_impact_does_not_persist_workflow_records(
     assert len(client.get("/api/workflows").json()) == before["workflows"]
     assert len(client.get("/api/pipeline-runs").json()) == before["runs"]
     assert len(client.get("/api/plans").json()) == before["plans"]
+
+
+def test_workflow_and_source_protection_skip_files_before_processing(
+    client: TestClient, media_root: Path
+) -> None:
+    (media_root / "protected").mkdir()
+    (media_root / "protected" / "keep.mp4").write_text("keep")
+    (media_root / "keep-name.mp4").write_text("keep")
+    (media_root / "change.mp4").write_text("change")
+    source = client.post("/api/sources", json={
+        "name": "Protected",
+        "root_path": str(media_root),
+        "protected_paths": ["protected"],
+    }).json()
+    scan = client.post("/api/scans", json={"source_id": source["id"]}).json()
+    for _ in range(100):
+        current = next(
+            item for item in client.get("/api/scans").json() if item["id"] == scan["id"]
+        )
+        if current["status"] == "completed":
+            break
+        __import__("time").sleep(0.02)
+    template = template_with(("clean", RuleCard(
+        id="rename",
+        name="Rename",
+        actions=[WorkflowAction(
+            kind="render_name", options={"name_template": "changed-{name}"}
+        )],
+    )))
+    template.protection.protected_names = ["keep-name.mp4"]
+    workflow = client.post("/api/workflow-templates/import", json={
+        "content": dump_template(template, "json"), "format": "json",
+    }).json()
+    run = client.post("/api/pipeline-runs", json={
+        "source_id": source["id"], "workflow_id": workflow["id"],
+    }).json()
+    assert run["summary"]["files"] == 1

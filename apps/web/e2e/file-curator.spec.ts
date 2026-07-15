@@ -121,7 +121,7 @@ test('desktop breakpoints do not overflow', async ({ page }) => {
   }
 })
 
-test('template selection opens the five-step builder and expert stage', async ({ page }) => {
+test('template selection opens guided questions and expert stage', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('API connected')).toBeVisible()
   await page.getByRole('button', { name: 'Pipeline' }).click()
@@ -129,35 +129,43 @@ test('template selection opens the five-step builder and expert stage', async ({
     name: 'Archive by year and month Extract dates and archive within the source. 2 rules',
   }).click()
 
-  await expect(page.getByRole('heading', { name: '1. What to process' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'What result do you want?' })).toBeVisible()
   await page.getByRole('button', { name: 'Expert' }).click()
   await expect(page.getByRole('heading', { name: 'Extract information' })).toBeVisible()
   await expect(page.getByRole('button', { name: '1 Extract all dates Extract all dates On' })).toBeVisible()
 })
 
-test('workflow delegates junk packs and keeps filename cleanup forms', async ({ page }) => {
+test('guided workflow recommends packs, protects files, and avoids live impact', async ({ page }) => {
+  let impactRequests = 0
+  page.on('request', request => { if(request.url().includes('/api/workflows/impact')) impactRequests += 1 })
   await page.goto('/')
   await expect(page.getByText('API connected')).toBeVisible()
   await page.getByRole('button', { name: 'Pipeline' }).click()
   await page.getByRole('button', { name: 'Build manually' }).click()
 
-  await page.getByRole('button', { name: /2\. What to recognize/ }).first().click()
-  await page.locator('.business-feature').filter({ hasText: 'Detect junk files' }).locator('.switch-control').click()
-  await expect(page.getByPlaceholder('Search rule packs')).toBeVisible()
+  await page.getByRole('button', { name: /Clean a download folder/ }).click()
+  await page.getByRole('button', { name: 'Choose recognition' }).click()
+  await expect(page.getByText('Recommended rule packs')).toBeVisible()
   await expect(page.getByText('BT advertisements and junk')).toBeVisible()
   await expect(page.getByLabel('Additional junk keywords')).toHaveCount(0)
-
-  await page.getByRole('button', { name: /3\. How to rename/ }).first().click()
-  await page.locator('.business-feature').filter({ hasText: 'Clean file names' }).locator('.switch-control').click()
+  await page.getByRole('button', { name: 'Choose name changes' }).click()
   await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
-
+  await page.getByRole('button', { name: 'Protect files' }).click()
+  await page.getByLabel('Workflow protected paths').fill('already-organized, favorites')
+  await page.getByRole('button', { name: 'Confirm rules' }).click()
+  await expect(page.getByText('Multi-file example sandbox')).toBeVisible()
+  await page.getByRole('button', { name: 'Test examples' }).click()
+  await expect(page.locator('.sample-result').first()).toBeVisible()
+  expect(impactRequests).toBe(0)
   await page.getByRole('button', { name: 'Expert' }).click()
-  await page.getByRole('button', { name: 'Detect and quarantine BT advertisements' }).click()
+  await page.getByRole('button', { name: /Classify and group/ }).click()
+  await page.getByRole('button', { name: /Detect junk files/ }).click()
   await expect(page.getByText('Reusable junk rule packs')).toBeVisible()
   await expect(page.getByText('Manage junk rules from the Junk rules navigation page.')).toBeVisible()
   await expect(page.getByLabel('Additional junk keywords')).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Remove advertisement words' }).click()
+  await page.getByRole('button', { name: /Clean names/ }).click()
+  await page.getByRole('button', { name: /Clean file names/ }).click()
   await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
   await expect(page.getByLabel('Prefixes to remove')).toBeVisible()
   await expect(page.getByLabel('Suffixes to remove')).toBeVisible()

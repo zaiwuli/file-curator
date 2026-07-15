@@ -1405,7 +1405,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         entries = session.query(FileEntry).filter_by(
             source_id=source.id, active=True, is_dir=False
         ).all()
-        entries = [entry for entry in entries if entry_in_scope(entry, payload.template.scope)]
+        entries = [
+            entry for entry in entries
+            if entry_in_scope(
+                entry,
+                payload.template.scope,
+                payload.template.protection,
+                source.protected_paths,
+            )
+        ]
         automatic = len(entries) <= 5000
         if not automatic and not payload.force:
             return {

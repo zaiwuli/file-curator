@@ -49,7 +49,12 @@ DEFAULT_PROCESSORS = [
 ]
 
 
-def entry_in_scope(entry: FileEntry, scope: Any) -> bool:
+def entry_in_scope(
+    entry: FileEntry,
+    scope: Any,
+    protection: Any | None = None,
+    source_protected_paths: list[str] | None = None,
+) -> bool:
     path = Path(entry.relative_path)
     parts = path.parts
     extension = entry.extension.casefold()
@@ -62,6 +67,19 @@ def entry_in_scope(entry: FileEntry, scope: Any) -> bool:
     if extension in {value.casefold() for value in scope.exclude_extensions}:
         return False
     relative = entry.relative_path.casefold()
+    protected_paths = list(source_protected_paths or [])
+    if protection is not None:
+        protected_paths.extend(protection.protected_paths)
+        if extension in {value.casefold() for value in protection.protected_extensions}:
+            return False
+        if entry.name.casefold() in {value.casefold() for value in protection.protected_names}:
+            return False
+        if any(value.casefold() in entry.name.casefold() for value in protection.protected_keywords):
+            return False
+        if any(re.search(value, entry.relative_path, re.IGNORECASE) for value in protection.protected_regex):
+            return False
+    if any(value.casefold() in relative for value in protected_paths):
+        return False
     if scope.include_paths and not any(value.casefold() in relative for value in scope.include_paths):
         return False
     if any(value.casefold() in relative for value in scope.exclude_paths):
@@ -148,7 +166,10 @@ def run_pipeline(
         session.query(FileEntry).filter_by(source_id=source.id, active=True, is_dir=False).all()
     )
     if template:
-        entries = [entry for entry in entries if entry_in_scope(entry, template.scope)]
+        entries = [
+            entry for entry in entries
+            if entry_in_scope(entry, template.scope, template.protection, source.protected_paths)
+        ]
     hash_groups: dict[str, list[FileEntry]] = {}
     name_size_groups: dict[tuple[str, int], list[FileEntry]] = {}
     normalized_name_size_groups: dict[tuple[str, int], list[FileEntry]] = {}
