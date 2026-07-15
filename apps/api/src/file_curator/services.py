@@ -49,7 +49,7 @@ DEFAULT_PROCESSORS = [
 ]
 
 
-def _entry_in_scope(entry: FileEntry, scope: Any) -> bool:
+def entry_in_scope(entry: FileEntry, scope: Any) -> bool:
     path = Path(entry.relative_path)
     parts = path.parts
     extension = entry.extension.casefold()
@@ -148,7 +148,7 @@ def run_pipeline(
         session.query(FileEntry).filter_by(source_id=source.id, active=True, is_dir=False).all()
     )
     if template:
-        entries = [entry for entry in entries if _entry_in_scope(entry, template.scope)]
+        entries = [entry for entry in entries if entry_in_scope(entry, template.scope)]
     hash_groups: dict[str, list[FileEntry]] = {}
     name_size_groups: dict[tuple[str, int], list[FileEntry]] = {}
     normalized_name_size_groups: dict[tuple[str, int], list[FileEntry]] = {}

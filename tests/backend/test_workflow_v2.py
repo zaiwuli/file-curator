@@ -411,3 +411,114 @@ def test_capability_schema_validates_action_options(client: TestClient) -> None:
     assert result["valid"] is False
     assert "template.option_type:junk.invalid_options:extensions:array" in result["errors"]
     assert "template.option_unknown:junk.invalid_options:future_option" in result["warnings"]
+
+
+def test_template_import_requires_explicit_junk_rule_pack_selection(
+    client: TestClient,
+) -> None:
+    template = template_with(("classify", RuleCard(
+        id="junk.needs_pack",
+        name="Detect junk",
+        actions=[WorkflowAction(
+            kind="run_processor", options={"processor_id": "detect_junk"}
+        )],
+    )))
+    content = dump_template(template, "json")
+
+    resolution = client.post(
+        "/api/workflow-templates/resolve",
+        json={"content": content, "format": "json"},
+    )
+    assert resolution.status_code == 200
+    payload = resolution.json()
+    assert payload["ready_to_import"] is False
+    assert payload["resolutions"][0]["status"] == "selection_required"
+
+    rejected = client.post(
+        "/api/workflow-templates/import",
+        json={"content": content, "format": "json"},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "template.rule_pack_selection_required"
+
+    selection = {"junk.needs_pack": [{
+        "pack_id": "bt-advertisement-and-junk", "version": 1,
+    }]}
+    resolved = client.post(
+        "/api/workflow-templates/resolve",
+        json={
+            "content": content,
+            "format": "json",
+            "rule_pack_selections": selection,
+        },
+    ).json()
+    assert resolved["ready_to_import"] is True
+    assert resolved["resolutions"][0]["status"] == "resolved"
+    junk_options = resolved["template"]["stages"][4]["rules"][0]["actions"][0]["options"]
+    assert junk_options["rule_pack_refs"] == [{
+        "pack_id": "bt-advertisement-and-junk", "version": 1,
+    }]
+    assert junk_options["rule_packs"][0]["id"] == "bt-advertisement-and-junk"
+
+    imported = client.post(
+        "/api/workflow-templates/import",
+        json={
+            "content": content,
+            "format": "json",
+            "rule_pack_selections": selection,
+        },
+    )
+    assert imported.status_code == 201
+
+
+def test_live_preview_blocks_unresolved_junk_pack(client: TestClient) -> None:
+    template = template_with(("classify", RuleCard(
+        id="junk.needs_pack",
+        name="Detect junk",
+        actions=[WorkflowAction(
+            kind="run_processor", options={"processor_id": "detect_junk"}
+        )],
+    )))
+    response = client.post("/api/workflow-templates/live-preview", json={
+        "template": template.model_dump(mode="json"),
+        "relative_path": "downloads/example.tmp",
+        "size": 10,
+        "fields": {},
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_preview"] is False
+    assert "workflow.junk_rule_pack_required" in {
+        item["code"] for item in payload["diagnostics"]
+    }
+
+
+def test_draft_impact_does_not_persist_workflow_records(
+    client: TestClient, media_root: Path
+) -> None:
+    (media_root / "movie.mp4").write_text("movie")
+    source_id = scan_source(client, media_root)
+    template = template_with(("clean", RuleCard(
+        id="rename",
+        name="Rename",
+        actions=[WorkflowAction(
+            kind="render_name", options={"name_template": "renamed.mp4"}
+        )],
+    )))
+    before = {
+        "workflows": len(client.get("/api/workflows").json()),
+        "runs": len(client.get("/api/pipeline-runs").json()),
+        "plans": len(client.get("/api/plans").json()),
+    }
+    impact = client.post("/api/workflows/impact", json={
+        "template": template.model_dump(mode="json"),
+        "source_id": source_id,
+        "draft_revision": "draft-1",
+        "force": False,
+    })
+    assert impact.status_code == 200, impact.text
+    assert impact.json()["rename"] == 1
+    assert impact.json()["draft_revision"] == "draft-1"
+    assert len(client.get("/api/workflows").json()) == before["workflows"]
+    assert len(client.get("/api/pipeline-runs").json()) == before["runs"]
+    assert len(client.get("/api/plans").json()) == before["plans"]

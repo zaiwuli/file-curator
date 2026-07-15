@@ -42,6 +42,8 @@ from .schemas import (
     Condition,
     ConditionGroup,
     DiagnosticsRead,
+    DraftWorkflowImpact,
+    DraftWorkflowImpactInput,
     DuplicateCandidate,
     FileGroupRead,
     FilePage,
@@ -62,6 +64,7 @@ from .schemas import (
     ReviewItemRead,
     RollbackPreview,
     RuleCard,
+    RulePackResolution,
     RuleTestInput,
     RuleTestResult,
     ScanCreate,
@@ -82,6 +85,8 @@ from .schemas import (
     WorkflowDependency,
     WorkflowDiagnosticsResult,
     WorkflowImpactSummary,
+    WorkflowLivePreviewInput,
+    WorkflowLiveSummary,
     WorkflowPortable,
     WorkflowRead,
     WorkflowRevisionCreate,
@@ -89,6 +94,7 @@ from .schemas import (
     WorkflowSimulationInput,
     WorkflowSimulationResult,
     WorkflowStage,
+    WorkflowTemplateResolution,
     WorkflowTemplateUpdate,
     WorkflowTemplateV2,
 )
@@ -99,6 +105,7 @@ from .services import (
     create_backup,
     create_manual_plan,
     create_plan_from_pipeline,
+    entry_in_scope,
     freeze_plan,
     get_revision,
     preflight_plan,
@@ -281,6 +288,151 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 422, detail={"code": "junk.pack_invalid", "errors": validation.errors}
             )
         return value.model_dump(mode="json", exclude={"read_only", "current_version"})
+
+    def resolve_template_rule_packs(
+        template: WorkflowTemplateV2,
+        selections: dict[str, list[Any]],
+        session: Session,
+    ) -> tuple[WorkflowTemplateV2, list[RulePackResolution]]:
+        resolved_template = deepcopy(template)
+        resolutions: list[RulePackResolution] = []
+        for stage in resolved_template.stages:
+            for rule in stage.rules:
+                for action in rule.actions:
+                    if action.kind != "run_processor" or action.options.get("processor_id") != "detect_junk":
+                        continue
+                    requested_values = action.options.get("rule_pack_refs", [])
+                    embedded_values = action.options.get("embedded_rule_packs", [])
+                    existing_snapshots = action.options.get("rule_packs", [])
+                    legacy_extensions = list(action.options.get("extensions", []))
+                    legacy_keywords = list(action.options.get("filename_contains", []))
+                    legacy_protected = list(action.options.get("protected_extensions", []))
+                    selected_values = selections.get(rule.id, [])
+                    requested = []
+                    for item in requested_values:
+                        if not isinstance(item, dict):
+                            continue
+                        pack_id = item.get("pack_id", item.get("id"))
+                        version = item.get("version")
+                        if pack_id and version is not None:
+                            requested.append({"pack_id": str(pack_id), "version": int(version)})
+                    if selected_values:
+                        requested = [
+                            {"pack_id": item.pack_id, "version": item.version}
+                            for item in selected_values
+                        ]
+                    snapshots: list[dict[str, Any]] = []
+                    resolved_refs: list[dict[str, Any]] = []
+                    missing_refs: list[dict[str, Any]] = []
+                    for reference in requested:
+                        reference_pack_id = str(reference["pack_id"])
+                        reference_version = int(str(reference["version"]))
+                        try:
+                            snapshot = junk_pack_version(
+                                reference_pack_id, reference_version, session
+                            )
+                        except HTTPException:
+                            missing_refs.append(reference)
+                            continue
+                        snapshot["source"] = "snapshot"
+                        snapshot["read_only"] = True
+                        snapshots.append(snapshot)
+                        resolved_refs.append(reference)
+                    embedded_count = 0
+                    for index, embedded in enumerate(embedded_values):
+                        if not isinstance(embedded, dict):
+                            continue
+                        embedded_id = str(embedded.get("id") or f"embedded-{rule.id}-{index + 1}")
+                        candidate = JunkRulePack.model_validate({
+                            **embedded,
+                            "id": embedded_id,
+                            "version": str(embedded.get("version", "1")),
+                            "source": "snapshot",
+                            "read_only": True,
+                            "current_version": int(embedded.get("current_version", 1)),
+                        })
+                        validation = validate_junk_pack(candidate)
+                        if not validation.valid:
+                            missing_refs.append({"pack_id": embedded_id, "version": 1})
+                            continue
+                        snapshots.append(candidate.model_dump(mode="json"))
+                        embedded_count += 1
+                    if not snapshots and existing_snapshots:
+                        snapshots = [
+                            deepcopy(item) for item in existing_snapshots if isinstance(item, dict)
+                        ]
+                        resolved_refs = [
+                            {
+                                "pack_id": str(item.get("id")),
+                                "version": int(item.get("version", 1)),
+                            }
+                            for item in snapshots
+                            if item.get("id")
+                        ]
+                    if not snapshots and (legacy_extensions or legacy_keywords or legacy_protected):
+                        legacy_rules: list[dict[str, Any]] = []
+                        if legacy_extensions:
+                            legacy_rules.append({
+                                "id": "legacy.extensions", "name": "Migrated extensions",
+                                "description": "Converted from legacy workflow options.",
+                                "enabled": True, "order": 0, "action": "quarantine",
+                                "score": 70, "extensions": legacy_extensions,
+                                "filename_contains": [], "filename_regex": [],
+                                "path_contains": [], "max_size": None, "min_size": None,
+                                "empty_only": False, "stop_on_match": False,
+                            })
+                        if legacy_keywords:
+                            legacy_rules.append({
+                                "id": "legacy.keywords", "name": "Migrated keywords",
+                                "description": "Converted from legacy workflow options.",
+                                "enabled": True, "order": len(legacy_rules),
+                                "action": "quarantine", "score": 55, "extensions": [],
+                                "filename_contains": legacy_keywords, "filename_regex": [],
+                                "path_contains": [], "max_size": None, "min_size": None,
+                                "empty_only": False, "stop_on_match": False,
+                            })
+                        legacy_snapshot = {
+                            "id": f"legacy-{rule.id}", "version": "1",
+                            "name": "Migrated workflow junk rules",
+                            "description": "Compatibility snapshot from legacy options.",
+                            "protected_extensions": legacy_protected,
+                            "protected_names": [], "protected_paths": [],
+                            "rules": legacy_rules, "source": "snapshot",
+                            "read_only": True, "current_version": 1,
+                        }
+                        snapshots = [legacy_snapshot]
+                        resolved_refs = [{"pack_id": legacy_snapshot["id"], "version": 1}]
+                    selection_required = bool(
+                        action.options.get("rule_pack_selection") == "required"
+                        or (not requested and not embedded_values and not existing_snapshots)
+                    )
+                    if missing_refs:
+                        status = "missing"
+                        message = "Some requested junk rule packs or versions are unavailable."
+                    elif selection_required and not snapshots:
+                        status = "selection_required"
+                        message = "Choose at least one junk rule pack before importing."
+                    elif embedded_count and not requested:
+                        status = "embedded"
+                        message = "Embedded junk rules are validated and ready as a workflow snapshot."
+                    else:
+                        status = "resolved"
+                        message = "Junk rule packs are resolved and pinned."
+                    if snapshots:
+                        action.options["rule_packs"] = snapshots
+                        action.options["rule_pack_refs"] = resolved_refs
+                    action.options.pop("embedded_rule_packs", None)
+                    action.options.pop("rule_pack_selection", None)
+                    resolutions.append(RulePackResolution(
+                        rule_id=rule.id,
+                        status=status,
+                        requested=requested,
+                        resolved=resolved_refs,
+                        missing=missing_refs,
+                        embedded_count=embedded_count,
+                        message=message,
+                    ))
+        return resolved_template, resolutions
 
     @app.get("/api/junk-rule-packs", response_model=list[JunkRulePack])
     def junk_rule_packs(session: Session = Depends(session_dependency)):
@@ -511,6 +663,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return TemplateValidationResult(valid=False, errors=[str(exc)])
         return validate_template(value, registry, settings.version)
 
+    @app.post(
+        "/api/workflow-templates/resolve", response_model=WorkflowTemplateResolution
+    )
+    def resolve_workflow_template(
+        payload: TemplateImportInput, session: Session = Depends(session_dependency)
+    ):
+        try:
+            value = parse_template_text(payload.content, payload.format)
+        except ValueError as exc:
+            return WorkflowTemplateResolution(valid=False, errors=[str(exc)])
+        validation = validate_template(value, registry, settings.version)
+        if not validation.valid or not validation.template:
+            return WorkflowTemplateResolution(
+                valid=False,
+                errors=validation.errors,
+                warnings=validation.warnings,
+            )
+        template, resolutions = resolve_template_rule_packs(
+            validation.template, payload.rule_pack_selections, session
+        )
+        ready = all(item.status in {"resolved", "embedded"} for item in resolutions)
+        return WorkflowTemplateResolution(
+            valid=True,
+            template=template,
+            resolutions=resolutions,
+            available_rule_packs=junk_rule_packs(session),
+            errors=[],
+            warnings=validation.warnings,
+            ready_to_import=ready,
+        )
+
     @app.post("/api/workflow-templates/import", response_model=WorkflowRead, status_code=201)
     def import_workflow_template(
         payload: TemplateImportInput, session: Session = Depends(session_dependency)
@@ -522,7 +705,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         validation = validate_template(value, registry, settings.version)
         if not validation.valid or not validation.template:
             raise HTTPException(422, detail={"code": "template.invalid", "errors": validation.errors})
-        template = validation.template
+        template, resolutions = resolve_template_rule_packs(
+            validation.template, payload.rule_pack_selections, session
+        )
+        unresolved = [
+            item for item in resolutions if item.status not in {"resolved", "embedded"}
+        ]
+        if unresolved:
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "template.rule_pack_selection_required",
+                    "rules": [item.rule_id for item in unresolved],
+                },
+            )
         workflow = Workflow(
             name=template.name,
             preset=template.preset,
@@ -677,6 +873,103 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 }
                 for step in steps
             ],
+        }
+
+    def live_summary(template: WorkflowTemplateV2) -> list[dict[str, str]]:
+        actions = [
+            action
+            for stage in template.stages if stage.enabled
+            for rule in stage.rules if rule.enabled
+            for action in rule.actions
+        ]
+        processors = {
+            str(action.options.get("processor_id"))
+            for action in actions if action.kind == "run_processor"
+        }
+        junk_actions = [
+            action for action in actions
+            if action.kind == "run_processor" and action.options.get("processor_id") == "detect_junk"
+        ]
+        junk_refs = [
+            reference
+            for action in junk_actions
+            for reference in action.options.get("rule_pack_refs", [])
+            if isinstance(reference, dict)
+        ]
+        recognition: list[str] = []
+        if "extract_date" in processors or any(action.kind == "extract_dates" for action in actions):
+            recognition.append("dates")
+        if "extract_identifier" in processors:
+            recognition.append("identifiers")
+        if "extract_sequence" in processors:
+            recognition.append("episodes")
+        if "extract_quality" in processors:
+            recognition.append("quality")
+        if "extract_language" in processors:
+            recognition.append("language")
+        if junk_actions:
+            recognition.append("junk files")
+        if "detect_duplicates" in processors:
+            recognition.append("duplicates")
+        rename: list[str] = []
+        if any(action.kind == "clean_name" for action in actions):
+            rename.append("clean names")
+        if any(action.kind == "inherit_parent" for action in actions):
+            rename.append("inherit parent")
+        if any(action.kind == "render_name" for action in actions):
+            rename.append("name template")
+        destination = next(
+            (action.kind for action in actions if action.kind in {"move", "archive", "quarantine"}),
+            "keep in place",
+        )
+        scope_value = "all indexed files"
+        if template.scope.include_extensions:
+            scope_value = ", ".join(template.scope.include_extensions)
+        elif template.scope.include_paths:
+            scope_value = ", ".join(template.scope.include_paths)
+        return [
+            {"key": "scope", "status": "ready", "title": "Process", "value": scope_value},
+            {
+                "key": "recognize",
+                "status": "incomplete" if junk_actions and not junk_refs else "ready",
+                "title": "Recognize",
+                "value": ", ".join(recognition) or "nothing selected",
+            },
+            {"key": "rename", "status": "enabled" if rename else "disabled", "title": "Rename", "value": ", ".join(rename) or "no name changes"},
+            {"key": "destination", "status": "review" if destination in {"archive", "quarantine"} else "ready", "title": "Destination", "value": destination},
+            {"key": "review", "status": "ready", "title": "Review", "value": f"{template.conflict_policy} conflicts, {template.review_policy} review"},
+        ]
+
+    @app.post(
+        "/api/workflow-templates/live-preview", response_model=WorkflowLiveSummary
+    )
+    def workflow_live_preview(payload: WorkflowLivePreviewInput):
+        simulation = simulate_workflow(payload)
+        diagnostics = diagnose_workflow(payload.template)
+        has_unresolved_pack = any(
+            action.kind == "run_processor"
+            and action.options.get("processor_id") == "detect_junk"
+            and not action.options.get("rule_packs")
+            for stage in payload.template.stages
+            for rule in stage.rules
+            for action in rule.actions
+        )
+        if has_unresolved_pack:
+            diagnostics.append({
+                "severity": "error",
+                "code": "workflow.junk_rule_pack_required",
+                "stage_id": "classify",
+                "rule_id": None,
+                "message": "Junk detection requires at least one selected rule pack.",
+                "suggestion": "Choose a rule pack in the Recognize step.",
+            })
+        valid = not any(item["severity"] == "error" for item in diagnostics)
+        return {
+            "valid": valid,
+            "can_preview": valid,
+            "summary": live_summary(payload.template),
+            "diagnostics": diagnostics,
+            "simulation": simulation,
         }
 
     @app.post(
@@ -1101,6 +1394,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "unchanged": max(0, total - len(plan.operations)),
             "conflicts": conflicts,
             "review": int(plan.summary.get("unresolved_review_count", 0)),
+        }
+
+    @app.post("/api/workflows/impact", response_model=DraftWorkflowImpact)
+    def draft_workflow_impact(
+        payload: DraftWorkflowImpactInput,
+        session: Session = Depends(session_dependency),
+    ):
+        source = require(Source, payload.source_id, session)
+        entries = session.query(FileEntry).filter_by(
+            source_id=source.id, active=True, is_dir=False
+        ).all()
+        entries = [entry for entry in entries if entry_in_scope(entry, payload.template.scope)]
+        automatic = len(entries) <= 5000
+        if not automatic and not payload.force:
+            return {
+                "source_id": source.id,
+                "draft_revision": payload.draft_revision,
+                "total": len(entries),
+                "rename": 0,
+                "move": 0,
+                "archive": 0,
+                "quarantine": 0,
+                "unchanged": len(entries),
+                "conflicts": 0,
+                "review": 0,
+                "related": 0,
+                "automatic": False,
+                "stale": False,
+            }
+        counts = {
+            "rename": 0, "move": 0, "archive": 0, "quarantine": 0,
+            "unchanged": 0, "review": 0,
+        }
+        targets: list[str] = []
+        for entry in entries:
+            context = ProcessingContext(
+                entry_id=entry.id,
+                relative_path=entry.relative_path,
+                original_name=entry.name,
+                parent_path=entry.parent_path,
+                extension=entry.extension,
+                size=entry.size,
+                mtime_ns=entry.mtime_ns,
+                fields={"text_signals": entry.text_signals},
+            )
+            steps = run_template_entry(payload.template, context, registry)
+            name = context.proposed_name or context.original_name
+            parent = context.proposed_parent if context.proposed_parent is not None else context.parent_path
+            target = (Path(parent) / name).as_posix() if parent else name
+            operation_kind = context.fields.get("operation_kind")
+            if operation_kind == "quarantine":
+                kind = "quarantine"
+                target = (Path(".file-curator-quarantine") / Path(target).name).as_posix()
+            elif target == entry.relative_path:
+                kind = "unchanged"
+            elif parent == entry.parent_path:
+                kind = "rename"
+            elif operation_kind == "archive":
+                kind = "archive"
+            else:
+                kind = "move"
+            counts[kind] += 1
+            targets.append(target.casefold())
+            if any(step.status in {"review", "warning"} for step in steps):
+                counts["review"] += 1
+        conflicts = len(targets) - len(set(targets))
+        related = sum(
+            len(group.member_ids)
+            for group in session.query(FileGroup).filter_by(source_id=source.id).all()
+        )
+        return {
+            "source_id": source.id,
+            "draft_revision": payload.draft_revision,
+            "total": len(entries),
+            **counts,
+            "conflicts": conflicts,
+            "related": related,
+            "automatic": automatic,
+            "stale": False,
         }
 
     @app.post("/api/workflows/{workflow_id}/revisions", response_model=WorkflowRead)

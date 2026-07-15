@@ -352,7 +352,10 @@ class JunkDetector(Processor):
                     for item in snapshots if isinstance(item, dict)
                 ],
             },
-            reasons=[item.reason for item in evaluation.evidence],
+            reasons=[
+                f"junk.{item.rule_id.split(':', 1)[-1]}"
+                for item in evaluation.evidence
+            ],
         )
 
 

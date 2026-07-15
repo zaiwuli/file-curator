@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, JunkRulePackVersion, JunkRulePackWrite, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, DraftWorkflowImpact, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, JunkRulePackVersion, JunkRulePackWrite, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, RulePackReference, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowLiveSummary, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateResolution, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -38,12 +38,15 @@ export const api = {
   validateJunkRulePack: (pack: unknown) => post<JunkRulePackValidation>('/junk-rule-packs/validate', pack),
   workflowTemplates: () => request<WorkflowTemplateV2[]>('/workflow-templates'),
   validateTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto') => post<TemplateValidation>('/workflow-templates/validate', { content, format }),
-  importTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto') => post<Workflow>('/workflow-templates/import', { content, format }),
+  resolveTemplate: (content:string,format:'auto'|'yaml'|'json'='auto',rulePackSelections:Record<string,RulePackReference[]>={})=>post<WorkflowTemplateResolution>('/workflow-templates/resolve',{content,format,rule_pack_selections:rulePackSelections}),
+  importTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto',rulePackSelections:Record<string,RulePackReference[]>={}) => post<Workflow>('/workflow-templates/import', { content, format,rule_pack_selections:rulePackSelections }),
   updateTemplate: (id: string, template: WorkflowTemplateV2) => request<Workflow>(`/workflow-templates/${id}`, { method: 'PUT', body: JSON.stringify({ template }) }),
   exportTemplate: async (id: string, format: 'yaml'|'json') => { const response=await fetch(`${apiBase}/workflow-templates/${id}/export?format=${format}`); if(!response.ok)throw new Error(`template.export_http_${response.status}`); return response.text() },
   testRule: (id: string, rule: RuleCard, relative_path: string) => post<{matched:boolean;status:string;input:Record<string,unknown>;output:Record<string,unknown>;reasons:string[];warnings:string[]}>(`/workflow-templates/${id}/test-rule`, { rule, relative_path }),
   workflowImpact: (id: string, sourceId: string) => post<WorkflowImpact>(`/workflows/${id}/impact?source_id=${encodeURIComponent(sourceId)}`),
   simulateWorkflow: (template: WorkflowTemplateV2, relative_path: string, size = 0) => post<WorkflowSimulation>('/workflow-templates/simulate', { template, relative_path, size, fields: {} }),
+  liveWorkflowPreview:(template:WorkflowTemplateV2,relative_path:string,size=0)=>post<WorkflowLiveSummary>('/workflow-templates/live-preview',{template,relative_path,size,fields:{}}),
+  draftWorkflowImpact:(template:WorkflowTemplateV2,source_id:string,draft_revision:string,force=false)=>post<DraftWorkflowImpact>('/workflows/impact',{template,source_id,draft_revision,force}),
   diagnoseWorkflow: (template: WorkflowTemplateV2) => post<WorkflowDiagnostics>('/workflow-templates/diagnostics', template),
   pipelineRuns: () => request<PipelineRun[]>('/pipeline-runs'),
   reviews: (runId?: string) => request<ReviewItem[]>(`/reviews${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`),

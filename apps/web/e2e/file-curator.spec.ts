@@ -90,6 +90,7 @@ test('desktop shell has named controls and no horizontal overflow', async ({ pag
   await expect(page.getByRole('button', { name: '粘贴 AI 模板' })).toBeVisible()
   await expect(page.getByRole('button', { name: '手动搭建' })).toBeVisible()
   await page.getByRole('button', { name: '手动搭建' }).click()
+  await page.getByRole('button', { name: '专家模式' }).click()
   await expect(page.getByText('处理关卡')).toBeVisible()
   await expect(page.getByText('实时检查')).toBeVisible()
   await expect(page.getByRole('button', { name: '添加规则' })).toBeVisible()
@@ -120,7 +121,7 @@ test('desktop breakpoints do not overflow', async ({ page }) => {
   }
 })
 
-test('template selection opens its first configured stage', async ({ page }) => {
+test('template selection opens the five-step builder and expert stage', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('API connected')).toBeVisible()
   await page.getByRole('button', { name: 'Pipeline' }).click()
@@ -128,6 +129,8 @@ test('template selection opens its first configured stage', async ({ page }) => 
     name: 'Archive by year and month Extract dates and archive within the source. 2 rules',
   }).click()
 
+  await expect(page.getByRole('heading', { name: '1. What to process' })).toBeVisible()
+  await page.getByRole('button', { name: 'Expert' }).click()
   await expect(page.getByRole('heading', { name: 'Extract information' })).toBeVisible()
   await expect(page.getByRole('button', { name: '1 Extract all dates Extract all dates On' })).toBeVisible()
 })
@@ -138,6 +141,17 @@ test('workflow delegates junk packs and keeps filename cleanup forms', async ({ 
   await page.getByRole('button', { name: 'Pipeline' }).click()
   await page.getByRole('button', { name: 'Build manually' }).click()
 
+  await page.getByRole('button', { name: /2\. What to recognize/ }).first().click()
+  await page.locator('.business-feature').filter({ hasText: 'Detect junk files' }).locator('.switch-control').click()
+  await expect(page.getByPlaceholder('Search rule packs')).toBeVisible()
+  await expect(page.getByText('BT advertisements and junk')).toBeVisible()
+  await expect(page.getByLabel('Additional junk keywords')).toHaveCount(0)
+
+  await page.getByRole('button', { name: /3\. How to rename/ }).first().click()
+  await page.locator('.business-feature').filter({ hasText: 'Clean file names' }).locator('.switch-control').click()
+  await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Expert' }).click()
   await page.getByRole('button', { name: 'Detect and quarantine BT advertisements' }).click()
   await expect(page.getByText('Reusable junk rule packs')).toBeVisible()
   await expect(page.getByText('Manage junk rules from the Junk rules navigation page.')).toBeVisible()
@@ -148,7 +162,6 @@ test('workflow delegates junk packs and keeps filename cleanup forms', async ({ 
   await expect(page.getByLabel('Prefixes to remove')).toBeVisible()
   await expect(page.getByLabel('Suffixes to remove')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Expert' }).click()
   await expect(page.getByText('Developer options (JSON)')).toBeVisible()
   await page.getByRole('button', { name: 'Standard' }).click()
   await expect(page.getByText('Developer options (JSON)')).toHaveCount(0)

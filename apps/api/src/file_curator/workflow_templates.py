@@ -249,7 +249,12 @@ def builtin_templates() -> list[WorkflowTemplateV2]:
     junk_detect = RuleCard(
         id="classify.junk",
         name="Detect BT advertisements and junk",
-        actions=[WorkflowAction(kind="run_processor", options={"processor_id": "detect_junk"})],
+        actions=[WorkflowAction(kind="run_processor", options={
+            "processor_id": "detect_junk",
+            "rule_pack_refs": [
+                {"pack_id": "bt-advertisement-and-junk", "version": 1}
+            ],
+        })],
     )
     quarantine = RuleCard(
         id="target.junk",

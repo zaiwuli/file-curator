@@ -252,6 +252,36 @@ class WorkflowTemplateV2(BaseModel):
     examples: list[TemplateExample] = []
 
 
+class WorkflowRulePackReference(BaseModel):
+    pack_id: str
+    version: int = Field(ge=1)
+
+
+class RulePackSelection(BaseModel):
+    pack_id: str
+    version: int = Field(ge=1)
+
+
+class RulePackResolution(BaseModel):
+    rule_id: str
+    status: Literal["resolved", "missing", "selection_required", "embedded"]
+    requested: list[WorkflowRulePackReference] = []
+    resolved: list[WorkflowRulePackReference] = []
+    missing: list[WorkflowRulePackReference] = []
+    embedded_count: int = 0
+    message: str
+
+
+class WorkflowTemplateResolution(BaseModel):
+    valid: bool
+    template: WorkflowTemplateV2 | None = None
+    resolutions: list[RulePackResolution] = []
+    available_rule_packs: list[JunkRulePack] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    ready_to_import: bool = False
+
+
 class TemplateTextInput(BaseModel):
     content: str = Field(min_length=2, max_length=1_000_000)
     format: Literal["auto", "yaml", "json"] = "auto"
@@ -268,6 +298,7 @@ class TemplateValidationResult(BaseModel):
 
 class TemplateImportInput(TemplateTextInput):
     source_id: str | None = None
+    rule_pack_selections: dict[str, list[RulePackSelection]] = {}
 
 
 class RuleTestInput(BaseModel):
@@ -310,6 +341,50 @@ class WorkflowSimulationResult(BaseModel):
     requires_review: bool
     fields: dict[str, Any]
     steps: list[WorkflowSimulationStep]
+
+
+class WorkflowSummaryItem(BaseModel):
+    key: Literal["scope", "recognize", "rename", "destination", "review"]
+    status: Literal[
+        "disabled", "enabled", "incomplete", "missing_dependency", "review", "ready"
+    ]
+    title: str
+    value: str
+
+
+class WorkflowLivePreviewInput(WorkflowSimulationInput):
+    pass
+
+
+class WorkflowLiveSummary(BaseModel):
+    valid: bool
+    can_preview: bool
+    summary: list[WorkflowSummaryItem]
+    diagnostics: list["WorkflowDiagnostic"]
+    simulation: WorkflowSimulationResult
+
+
+class DraftWorkflowImpactInput(BaseModel):
+    template: WorkflowTemplateV2
+    source_id: str
+    draft_revision: str
+    force: bool = False
+
+
+class DraftWorkflowImpact(BaseModel):
+    source_id: str
+    draft_revision: str
+    total: int
+    rename: int
+    move: int
+    archive: int
+    quarantine: int
+    unchanged: int
+    conflicts: int
+    review: int
+    related: int = 0
+    automatic: bool = True
+    stale: bool = False
 
 
 class WorkflowDiagnostic(BaseModel):
