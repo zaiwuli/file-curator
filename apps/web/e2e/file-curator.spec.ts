@@ -107,3 +107,20 @@ test('template selection opens its first configured stage', async ({ page }) => 
   await expect(page.getByRole('heading', { name: 'Extract information' })).toBeVisible()
   await expect(page.getByRole('button', { name: '1 Extract all dates Extract all dates On' })).toBeVisible()
 })
+
+test('custom junk and filename cleanup fields are available', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByText('API connected')).toBeVisible()
+  await page.getByRole('button', { name: 'Pipeline' }).click()
+  await page.getByRole('button', { name: 'Build manually' }).click()
+
+  await page.getByRole('button', { name: 'Detect and quarantine BT advertisements' }).click()
+  await expect(page.getByLabel('Additional junk keywords')).toBeVisible()
+  await expect(page.getByLabel('Additional junk file extensions')).toBeVisible()
+  await expect(page.getByLabel('Protected extension whitelist')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Remove advertisement words' }).click()
+  await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
+  await expect(page.getByLabel('Prefixes to remove')).toBeVisible()
+  await expect(page.getByLabel('Suffixes to remove')).toBeVisible()
+})

@@ -108,6 +108,20 @@ def test_number_cleanup_only_uses_explicit_patterns() -> None:
     assert item.proposed_name == "ABC-123 2026-01-05.mp4"
 
 
+def test_name_cleanup_removes_configured_keywords_and_suffixes() -> None:
+    template = template_with(("clean", RuleCard(
+        id="clean.custom_words",
+        name="Remove configured words",
+        actions=[WorkflowAction(kind="clean_name", options={
+            "remove_words": ["推广"],
+            "remove_suffixes": ["-资源发布"],
+        })],
+    )))
+    item = context("推广-Movie-资源发布.mp4")
+    run_template_entry(template, item, create_default_registry())
+    assert item.proposed_name == "Movie.mp4"
+
+
 def test_template_api_yaml_import_export_and_impact(
     client: TestClient, media_root: Path
 ) -> None:

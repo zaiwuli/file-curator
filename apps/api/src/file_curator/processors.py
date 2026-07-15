@@ -276,7 +276,6 @@ class JunkDetector(Processor):
         provides=("junk_candidate",),
         score_weight=0.1,
         option_schema={
-            "pack_id": {"type": "string", "default": "bt-advertisement-and-junk"},
             "extensions": {"type": "array", "items": {"type": "string"}},
             "filename_contains": {"type": "array", "items": {"type": "string"}},
             "protected_extensions": {"type": "array", "items": {"type": "string"}},
