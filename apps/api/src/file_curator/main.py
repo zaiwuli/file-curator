@@ -98,6 +98,7 @@ from .services import (
     run_pipeline,
 )
 from .workers import WorkerService
+from .workflow_capabilities import workflow_capability_manifest
 from .workflow_diagnostics import diagnose_workflow
 from .workflow_engine import run_template_entry
 from .workflow_templates import (
@@ -182,6 +183,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/processors")
     def processors() -> list[dict[str, Any]]:
         return [manifest.__dict__ for manifest in registry.manifests()]
+
+    @app.get("/api/workflow-capabilities")
+    def workflow_capabilities() -> dict[str, Any]:
+        return workflow_capability_manifest(registry)
 
     @app.get("/api/junk-rule-packs", response_model=list[JunkRulePack])
     def junk_rule_packs():

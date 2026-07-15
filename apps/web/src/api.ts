@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -26,6 +26,7 @@ export const api = {
   sources: () => request<ApiSource[]>('/sources'),
   workflows: () => request<Workflow[]>('/workflows'),
   processors: () => request<ProcessorManifest[]>('/processors'),
+  workflowCapabilities: () => request<WorkflowCapabilityManifest>('/workflow-capabilities'),
   junkRulePacks: () => request<JunkRulePack[]>('/junk-rule-packs'),
   validateJunkRulePack: (pack: unknown) => post<JunkRulePackValidation>('/junk-rule-packs/validate', pack),
   workflowTemplates: () => request<WorkflowTemplateV2[]>('/workflow-templates'),

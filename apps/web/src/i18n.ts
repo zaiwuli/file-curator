@@ -1,6 +1,8 @@
-import { useEffect } from 'react'
+import { createContext, createElement, useContext, useEffect, type ReactNode } from 'react'
 
 const zh: Record<string,string> = {
+  'Choose the features to include. Switch to Standard mode for detailed settings.':'选择需要的功能；进入标准模式可继续调整详细参数。',
+  'Remove':'移除','Add':'添加','Key':'键','Add mapping':'添加映射','Pattern':'匹配规则','Replacement':'替换内容','Add replacement':'添加替换','This field is required.':'此项为必填。','Enter a valid regular expression.':'请输入有效的正则表达式。','Enter a valid number.':'请输入有效数字。','Extensions must start with a dot.':'扩展名必须以点号开头。','Options must be valid JSON':'选项必须是有效 JSON','Use deterministic evidence to identify BT advertisements, temporary files, and suspicious attachments.':'使用确定性证据识别 BT 广告、临时文件和可疑附件。','Protected extensions':'受保护扩展名','Rule':'规则','Evidence':'证据','Score':'分数','path / size':'路径/大小','Custom rules are saved with each workflow':'自定义规则随工作流保存','Add Detect junk and advertisements in the Classify and group stage to enter extra keywords, extensions, and protected values.':'在“分类与分组”关卡添加“检测垃圾和广告”，即可填写额外关键词、扩展名和保护白名单。','Import or validate a custom rule pack (JSON)':'导入或验证自定义规则包（JSON）','Validate rule pack':'验证规则包','Rule pack is valid':'规则包有效','BT advertisements and junk':'BT 广告和垃圾文件','Metadata-only rules for incomplete downloads, links, promotion files, and suspicious small attachments.':'仅使用元数据识别未完成下载、链接、推广文件和可疑小附件。',
   'Additional junk file extensions':'额外垃圾文件扩展名','Additional junk keywords':'额外垃圾关键词','Protected extension whitelist':'受保护扩展名白名单','Require repeated-file hash evidence':'要求重复文件哈希证据','Inspect small text files for promotion signals':'检查小文本中的推广信号','Keywords to remove from file name':'从文件名移除的关键词','Suffixes to remove':'需要移除的后缀',
   'Scope and filters':'\u8303\u56f4\u548c\u7b5b\u9009','Ignore system paths':'\u5ffd\u7565\u7cfb\u7edf\u8def\u5f84','Maximum depth':'\u6700\u5927\u76ee\u5f55\u6df1\u5ea6','Exclude extensions':'\u6392\u9664\u6269\u5c55\u540d','Include paths':'\u5305\u542b\u8def\u5f84','Minimum bytes':'\u6700\u5c0f\u5b57\u8282\u6570','Maximum bytes':'\u6700\u5927\u5b57\u8282\u6570','Modified after (ns)':'\u4fee\u6539\u65f6\u95f4\u8d77\u70b9\uff08\u7eb3\u79d2\uff09','Modified before (ns)':'\u4fee\u6539\u65f6\u95f4\u7ec8\u70b9\uff08\u7eb3\u79d2\uff09',
   'Associated files':'\u5173\u8054\u6587\u4ef6','Move related sidecar files together':'\u540c\u6b65\u79fb\u52a8\u5173\u8054\u6587\u4ef6','Sidecar extensions':'\u5173\u8054\u6587\u4ef6\u6269\u5c55\u540d','Uncertain association':'\u65e0\u6cd5\u786e\u5b9a\u5173\u8054\u65f6','Batch protection':'\u6279\u91cf\u4fdd\u62a4','Maximum operations':'\u6700\u5927\u64cd\u4f5c\u6570','Maximum quarantine files':'\u6700\u5927\u9694\u79bb\u6587\u4ef6\u6570','Require review above':'\u8d85\u8fc7\u6b64\u6570\u91cf\u65f6\u5fc5\u987b\u5ba1\u6838',
@@ -56,8 +58,30 @@ export const messages = {
 
 export type Locale = keyof typeof messages
 
+const semanticEn:Record<string,string>={
+  'workflow.processor':'Processor','workflow.junk.extensions':'Additional junk file extensions','workflow.junk.extensions_help':'Files with these extensions become junk candidates.','workflow.junk.extensions_placeholder':'Type an extension and press Enter','workflow.junk.keywords':'Additional junk keywords','workflow.junk.keywords_help':'File names containing these values become junk candidates.','workflow.junk.keywords_placeholder':'Type a keyword and press Enter','workflow.junk.protected':'Protected extension whitelist','workflow.junk.protected_help':'Protected extensions are never flagged by generic junk rules.','workflow.junk.protected_placeholder':'Type a protected extension','workflow.junk.require_hash':'Require repeated-file hash evidence','workflow.junk.require_hash_help':'Run a content hash scan before using repeated-file evidence.','workflow.junk.inspect_text':'Inspect small text files for promotion signals','workflow.junk.inspect_text_help':'Reads bounded small text attachments only when enabled.','workflow.duplicate.method':'Duplicate matching method','workflow.duplicate.method_help':'Choose name, normalized name, or content hash matching.','workflow.duplicate.minimum':'Minimum duplicate copies','workflow.duplicate.minimum_help':'Groups smaller than this remain unchanged.','workflow.regex.pattern':'Matching pattern','workflow.regex.pattern_help':'A valid regular expression used for extraction.','workflow.regex.pattern_placeholder':'Example: (?P<code>[A-Z]+-\\d+)','workflow.regex.field':'Extracted field name','workflow.regex.field_help':'The field exposed to later rules.','workflow.source_prefix.values':'Known source prefixes','workflow.source_prefix.values_help':'Prefixes recognized at the start of a file name.','workflow.language.markers':'Language marker map','workflow.language.markers_help':'Map a language to one or more file-name markers.','workflow.category.map':'File category map','workflow.category.map_help':'Map a category to one or more extensions.','workflow.cleanup.words':'Keywords to remove from file name','workflow.cleanup.words_help':'Exact text values removed case-insensitively.','workflow.cleanup.prefixes':'Prefixes to remove','workflow.cleanup.prefixes_help':'Only matching values at the start are removed.','workflow.cleanup.suffixes':'Suffixes to remove','workflow.cleanup.suffixes_help':'Only matching values at the end are removed.','workflow.cleanup.replacements':'Regex replacements','workflow.cleanup.replacements_help':'Ordered pattern and replacement pairs.','workflow.cleanup.invalid_replacement':'Illegal character replacement','workflow.cleanup.invalid_replacement_help':'Replacement used for characters forbidden by the file system.','workflow.cleanup.prepend_dates':'Put all extracted dates first','workflow.cleanup.prepend_dates_help':'Moves normalized dates to the beginning of the name.','workflow.cleanup.normalize_separators':'Normalize spaces and separators','workflow.cleanup.normalize_separators_help':'Collapses repeated spaces, dots, and underscores.','workflow.cleanup.number_patterns':'Allowed number-removal patterns','workflow.cleanup.number_patterns_help':'Only numbers matching an explicit pattern can be removed.','workflow.cleanup.parent_separator':'Parent and name separator','workflow.cleanup.parent_separator_help':'Text inserted between the inherited parent and file name.','workflow.naming.template':'File name template','workflow.naming.template_help':'Builds a file name from extracted fields.','workflow.target.parent_template':'Destination folder template','workflow.target.parent_template_help':'Builds a relative destination folder.','workflow.target.path':'Destination folder template','workflow.target.path_help':'The path must remain inside the selected source.','workflow.target.missing':'Missing information','workflow.target.missing_help':'Choose what happens when required template fields are absent.',
+  'action.run_processor':'Run processor','action.run_processor.help':'Run a deterministic extractor, classifier, or detector.','action.extract_dates':'Extract all dates','action.extract_dates.help':'Extracts, normalizes, sorts, and exposes every valid date.','action.clean_name':'Clean file name','action.clean_name.help':'Removes configured text and normalizes the file name.','action.remove_numbers':'Remove number patterns','action.remove_numbers.help':'Removes only explicit number patterns after protected fields are extracted.','action.inherit_parent':'Inherit parent name','action.inherit_parent.help':'Prefixes the file name with its parent folder.','action.render_name':'Render name template','action.render_name.help':'Builds the final file name from a template.','action.keep':'Keep in place','action.keep.help':'Leaves the file unchanged.','action.move':'Move','action.move.help':'Moves the file inside the current source.','action.archive':'Archive','action.archive.help':'Archives the file using a relative folder template.','action.quarantine':'Quarantine','action.quarantine.help':'Moves the file to quarantine and requires review.','action.skip':'Skip file','action.skip.help':'Stops processing this file.','action.require_review':'Require review','action.require_review.help':'Adds a manual review gate without changing the file.',
+}
+const semanticZh:Record<string,string>={
+  'workflow.processor':'处理器','workflow.junk.extensions':'额外垃圾文件扩展名','workflow.junk.extensions_help':'具有这些扩展名的文件会成为垃圾候选。','workflow.junk.extensions_placeholder':'输入扩展名后按回车','workflow.junk.keywords':'额外垃圾关键词','workflow.junk.keywords_help':'文件名包含这些内容时成为垃圾候选。','workflow.junk.keywords_placeholder':'输入关键词后按回车','workflow.junk.protected':'受保护扩展名白名单','workflow.junk.protected_help':'通用垃圾规则不会标记这些扩展名。','workflow.junk.protected_placeholder':'输入受保护扩展名','workflow.junk.require_hash':'要求重复文件哈希证据','workflow.junk.require_hash_help':'使用重复文件证据前先进行内容哈希扫描。','workflow.junk.inspect_text':'检查小文本中的推广信号','workflow.junk.inspect_text_help':'仅在启用时读取有限大小的小文本附件。','workflow.duplicate.method':'重复文件匹配方式','workflow.duplicate.method_help':'选择名称、规范名称或内容哈希匹配。','workflow.duplicate.minimum':'最低重复数量','workflow.duplicate.minimum_help':'少于此数量的文件组保持不变。','workflow.regex.pattern':'匹配正则','workflow.regex.pattern_help':'用于提取的有效正则表达式。','workflow.regex.pattern_placeholder':'示例：(?P<code>[A-Z]+-\\d+)','workflow.regex.field':'提取字段名称','workflow.regex.field_help':'提供给后续规则使用的字段。','workflow.source_prefix.values':'已知来源前缀','workflow.source_prefix.values_help':'识别文件名开头的来源标记。','workflow.language.markers':'语言标记映射','workflow.language.markers_help':'将语言映射到一个或多个文件名标记。','workflow.category.map':'文件分类映射','workflow.category.map_help':'将分类映射到一个或多个扩展名。','workflow.cleanup.words':'从文件名移除的关键词','workflow.cleanup.words_help':'不区分大小写移除完全匹配的文字。','workflow.cleanup.prefixes':'需要移除的前缀','workflow.cleanup.prefixes_help':'只移除文件名开头匹配的内容。','workflow.cleanup.suffixes':'需要移除的后缀','workflow.cleanup.suffixes_help':'只移除文件名结尾匹配的内容。','workflow.cleanup.replacements':'正则替换','workflow.cleanup.replacements_help':'按顺序执行正则与替换文本。','workflow.cleanup.invalid_replacement':'非法字符替换符','workflow.cleanup.invalid_replacement_help':'用于替换文件系统不允许的字符。','workflow.cleanup.prepend_dates':'将全部日期放到最前','workflow.cleanup.prepend_dates_help':'把规范化后的日期移到名称开头。','workflow.cleanup.normalize_separators':'规范空格和分隔符','workflow.cleanup.normalize_separators_help':'合并重复空格、点号和下划线。','workflow.cleanup.number_patterns':'允许删除的数字规则','workflow.cleanup.number_patterns_help':'只有明确匹配规则且未受保护的数字可以删除。','workflow.cleanup.parent_separator':'父目录与文件名分隔符','workflow.cleanup.parent_separator_help':'插入继承的父目录名和文件名之间。','workflow.naming.template':'文件名模板','workflow.naming.template_help':'使用提取字段生成最终文件名。','workflow.target.parent_template':'目标文件夹模板','workflow.target.parent_template_help':'生成相对目标文件夹。','workflow.target.path':'目标文件夹模板','workflow.target.path_help':'目标路径必须位于当前数据源内部。','workflow.target.missing':'缺少信息时','workflow.target.missing_help':'选择缺少模板字段时的处理方式。',
+  'action.run_processor':'运行处理器','action.run_processor.help':'运行确定性的提取、分类或检测处理器。','action.extract_dates':'提取全部日期','action.extract_dates.help':'提取、规范化、排序并提供全部有效日期。','action.clean_name':'清理文件名','action.clean_name.help':'移除配置内容并规范文件名。','action.remove_numbers':'删除数字规则','action.remove_numbers.help':'提取受保护字段后只删除明确数字规则。','action.inherit_parent':'继承父目录名称','action.inherit_parent.help':'将父目录名称添加到文件名前。','action.render_name':'生成名称模板','action.render_name.help':'根据模板生成最终文件名。','action.keep':'保持原位','action.keep.help':'保持文件不变。','action.move':'移动','action.move.help':'在当前数据源内部移动文件。','action.archive':'归档','action.archive.help':'使用相对目录模板归档文件。','action.quarantine':'隔离','action.quarantine.help':'将文件移入隔离区并要求审核。','action.skip':'跳过文件','action.skip.help':'停止处理当前文件。','action.require_review':'需要审核','action.require_review.help':'不修改文件，仅增加人工审核关卡。',
+}
+export const semanticTranslations={en:semanticEn,'zh-CN':semanticZh} as const
+const runtimeZh:Record<string,string>={
+  'Incomplete download':'未完成下载','Temporary or incomplete download extension.':'临时或未完成下载的扩展名。','Internet link file':'互联网链接文件','A shortcut or URL file is usually a promotion pointer.':'快捷方式或网址文件通常是推广入口。','Advertisement keyword':'广告关键词','The filename contains a common promotion marker.':'文件名包含常见推广标记。','Website marker':'网站标记','The filename contains a URL or domain marker.':'文件名包含网址或域名标记。','Empty file':'空文件','The file has no data.':'文件内容为空。','Tiny promotion text':'小型推广文本','A small text or HTML attachment can contain a promotion link.':'小型文本或 HTML 附件可能包含推广链接。','Tiny unrelated media':'异常小媒体','An unusually small image or video is a review candidate.':'异常小的图片或视频需要审核。','Sample or trailer marker':'样片或预告标记','The name suggests a sample or trailer rather than the main file.':'名称表明它可能是样片或预告而非主文件。',
+  'This rule has no action.':'此规则没有动作。','Add an action or disable the rule.':'请添加动作或禁用此规则。','This rule applies to every file.':'此规则适用于所有文件。','Add conditions if the action should be scoped.':'如果动作只适用于部分文件，请添加条件。','Archive path uses date fields but no date extractor is enabled.':'归档路径使用了日期字段，但未启用日期提取。','Add Extract all dates before the archive rule.':'请在归档规则前添加“提取全部日期”。','Duplicate review is enabled without duplicate detection.':'已启用重复文件审核，但没有重复检测。','Add the Detect duplicate groups processor before the review rule.':'请在审核规则前添加重复文件检测。','Quarantine is enabled without an explicit review action.':'隔离动作缺少明确的审核步骤。','Add Require review to the quarantine rule.':'请为隔离规则添加“需要审核”。','Number cleanup runs without date or identifier extraction.':'数字清理前没有提取日期或编号。','Extract protected dates and identifiers before removing number patterns.':'删除数字前请先提取并保护日期和编号。','Name template uses {dates} but no multi-date extractor is enabled.':'名称模板使用了 {dates}，但未启用多日期提取。','Add Extract all dates before rendering the name.':'生成名称前请添加“提取全部日期”。','Move or archive has an empty destination.':'移动或归档的目标目录为空。','Enter a relative destination folder template.':'请输入相对目标文件夹模板。','This workflow does not propose file changes.':'此工作流不会产生文件变更。','Add a naming or target action if changes are intended.':'如需变更，请添加命名或目标动作。',
+}
+
 export function translate(locale:Locale,value:string):string {
+  if(semanticEn[value]) return locale==='en'?semanticEn[value]:semanticZh[value]??semanticEn[value]
+  if(value.startsWith('processor.')) {
+    const help=value.endsWith('.help')
+    const identifier=value.slice('processor.'.length,help?-'.help'.length:undefined).replaceAll('_',' ')
+    const name=translate(locale,identifier)
+    return help?(locale==='en'?`Configure the ${identifier} processor.`:`配置${name}处理器。`):name
+  }
   if(locale==='en') return value
+  if(runtimeZh[value]) return runtimeZh[value]
   if(zh[value]) return zh[value]
   return value
     .replace(/^Every (\d+) minutes$/, '每 $1 分钟')
@@ -88,46 +112,12 @@ export function translate(locale:Locale,value:string):string {
     .replace(/^Notifications (granted|denied|default)$/, (_match, permission:string) => `浏览器通知：${permission === 'granted' ? '已允许' : permission === 'denied' ? '已拒绝' : '未决定'}`)
 }
 
-const originals = new WeakMap<Node,string>()
-const applied = new WeakMap<Node,string>()
-const attributeOriginals = new WeakMap<Element,Record<string,string>>()
+type I18nValue={locale:Locale;t:(key:string)=>string}
+const I18nContext=createContext<I18nValue>({locale:'en',t:value=>value})
 
-function localizeDocument(locale:Locale) {
-  const root=document.getElementById('root')
-  if(!root)return
-  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT)
-  let node:Node|null
-  while((node=walker.nextNode())) {
-    const current=node.nodeValue||''
-    if(!originals.has(node)||current!==applied.get(node)) originals.set(node,current)
-    const original=originals.get(node)||current
-    const trimmed=original.trim()
-    const localized=trimmed?original.replace(trimmed,translate(locale,trimmed)):original
-    applied.set(node,localized)
-    if(current!==localized)node.nodeValue=localized
-  }
-  for(const element of root.querySelectorAll('*')) {
-    const stored=attributeOriginals.get(element)||{}
-    for(const attribute of ['placeholder','title','aria-label']) {
-      const current=element.getAttribute(attribute)
-      if(current!==null&&stored[attribute]===undefined)stored[attribute]=current
-      if(stored[attribute]!==undefined) {
-        const localized=translate(locale,stored[attribute])
-        if(current!==localized)element.setAttribute(attribute,localized)
-      }
-    }
-    attributeOriginals.set(element,stored)
-  }
+export function I18nProvider({locale,children}:{locale:Locale;children:ReactNode}) {
+  useEffect(()=>{document.documentElement.lang=locale},[locale])
+  return createElement(I18nContext.Provider,{value:{locale,t:value=>translate(locale,value)}},children)
 }
 
-export function useDocumentLocale(locale:Locale) {
-  useEffect(()=>{
-    document.documentElement.lang=locale
-    const apply=()=>localizeDocument(locale)
-    apply()
-    const observer=new MutationObserver(apply)
-    const root=document.getElementById('root')
-    if(root)observer.observe(root,{childList:true,subtree:true,characterData:true})
-    return()=>observer.disconnect()
-  },[locale])
-}
+export function useI18n(){return useContext(I18nContext)}

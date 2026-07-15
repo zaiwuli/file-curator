@@ -18,6 +18,7 @@ from .schemas import (
     WorkflowStage,
     WorkflowTemplateV2,
 )
+from .workflow_capabilities import ACTION_CAPABILITIES, OPTION_UI, validate_capability_options
 
 STAGE_ORDER = ["scope", "filter", "extract", "clean", "classify", "target", "review", "execute"]
 ACTION_STAGES = {
@@ -103,6 +104,7 @@ def validate_template(value: dict[str, Any], registry: ProcessorRegistry, versio
     seen_stages: set[str] = set()
     seen_rules: set[str] = set()
     manifests = {item.id: item for item in registry.manifests()}
+    action_schemas = {item["kind"]: item["option_schema"] for item in ACTION_CAPABILITIES}
     for stage in template.stages:
         if stage.id in seen_stages:
             errors.append(f"template.duplicate_stage:{stage.id}")
@@ -118,6 +120,26 @@ def validate_template(value: dict[str, Any], registry: ProcessorRegistry, versio
                     processor_id = str(action.options.get("processor_id", ""))
                     if processor_id not in manifests:
                         missing.append(processor_id or "<empty>")
+                    else:
+                        processor_options = {
+                            name: option for name, option in action.options.items()
+                            if name != "processor_id"
+                        }
+                        processor_schema = {
+                            name: {**definition, **OPTION_UI.get(name, {})}
+                            for name, definition in manifests[processor_id].option_schema.items()
+                        }
+                        option_errors, option_warnings = validate_capability_options(
+                            processor_options, processor_schema, rule.id
+                        )
+                        errors.extend(option_errors)
+                        warnings.extend(option_warnings)
+                else:
+                    option_errors, option_warnings = validate_capability_options(
+                        action.options, action_schemas[action.kind], rule.id
+                    )
+                    errors.extend(option_errors)
+                    warnings.extend(option_warnings)
                 for option_name in ("name_template", "parent_template", "path_template"):
                     option = action.options.get(option_name)
                     if isinstance(option, str):

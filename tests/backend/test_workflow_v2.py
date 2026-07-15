@@ -392,3 +392,22 @@ def test_v2_revision_comparison_includes_scope_and_rules(client: TestClient) -> 
     ).json()
     assert "settings:scope" in comparison["changed"]
     assert "rule:clean:clean.names" in comparison["changed"]
+
+
+def test_capability_schema_validates_action_options(client: TestClient) -> None:
+    template = template_with(("classify", RuleCard(
+        id="junk.invalid_options",
+        name="Invalid junk options",
+        actions=[WorkflowAction(kind="run_processor", options={
+            "processor_id": "detect_junk",
+            "extensions": ".tmp",
+            "future_option": True,
+        })],
+    )))
+    result = client.post(
+        "/api/workflow-templates/validate",
+        json={"content": dump_template(template, "json"), "format": "json"},
+    ).json()
+    assert result["valid"] is False
+    assert "template.option_type:junk.invalid_options:extensions:array" in result["errors"]
+    assert "template.option_unknown:junk.invalid_options:future_option" in result["warnings"]

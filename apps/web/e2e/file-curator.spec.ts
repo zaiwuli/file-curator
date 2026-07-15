@@ -94,6 +94,30 @@ test('desktop shell has named controls and no horizontal overflow', async ({ pag
   await expect(page.getByText('实时检查')).toBeVisible()
   await expect(page.getByRole('button', { name: '添加规则' })).toBeVisible()
   await expect(page.getByText('冻结计划并确认前，真实文件保持不变。')).toBeVisible()
+  const undersizedText = await page.locator('body').evaluate(body => [...body.querySelectorAll('*')].filter(element => {
+    const style = getComputedStyle(element)
+    const rect = element.getBoundingClientRect()
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0 && element.childNodes.length === 1 && element.firstChild?.nodeType === 3 && element.textContent?.trim() && Number.parseFloat(style.fontSize) < 12
+  }).length)
+  expect(undersizedText).toBe(0)
+  for (const [navigation,heading] of [
+    ['数据源','数据源'],['文件浏览器','文件浏览器'],['垃圾规则','垃圾规则'],
+    ['审核中心','审核中心'],['虚拟预览','虚拟预览'],['执行','执行'],
+    ['历史记录','历史与恢复'],['设置','设置'],
+  ] as const) {
+    await page.getByRole('button', { name: navigation }).click()
+    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+  }
+})
+
+test('desktop breakpoints do not overflow', async ({ page }) => {
+  for (const width of [1024,1280,1440,1920]) {
+    await page.setViewportSize({ width, height: 960 })
+    await page.goto('/')
+    await expect(page.getByText('API connected')).toBeVisible()
+    const overflow = await page.locator('html').evaluate(element => element.scrollWidth > element.clientWidth)
+    expect(overflow, `horizontal overflow at ${width}px`).toBe(false)
+  }
 })
 
 test('template selection opens its first configured stage', async ({ page }) => {
@@ -123,4 +147,9 @@ test('custom junk and filename cleanup fields are available', async ({ page }) =
   await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
   await expect(page.getByLabel('Prefixes to remove')).toBeVisible()
   await expect(page.getByLabel('Suffixes to remove')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Expert' }).click()
+  await expect(page.getByText('Developer options (JSON)')).toBeVisible()
+  await page.getByRole('button', { name: 'Standard' }).click()
+  await expect(page.getByText('Developer options (JSON)')).toHaveCount(0)
 })

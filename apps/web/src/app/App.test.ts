@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { messages, translate } from '../i18n'
+import { semanticTranslations, messages, translate } from '../i18n'
+import { validateWorkflowOption } from '../components/WorkflowOptionForm'
 
 describe('localization resources', () => {
   it('keeps navigation keys aligned', () => {
     expect(Object.keys(messages.en.nav)).toEqual(Object.keys(messages['zh-CN'].nav))
+    expect(Object.keys(semanticTranslations.en).sort()).toEqual(Object.keys(semanticTranslations['zh-CN']).sort())
+  })
+  it('validates schema-driven fields',()=>{
+    expect(validateWorkflowOption('extensions',{type:'array',title_key:'x',control:'tags'},['tmp'])).toBe('Extensions must start with a dot.')
+    expect(validateWorkflowOption('pattern',{type:'string',title_key:'x',control:'regex'},'[')).toBe('Enter a valid regular expression.')
+    expect(validateWorkflowOption('minimum_count',{type:'integer',title_key:'x',control:'number',minimum:2},1)).toBe('Minimum: 2')
   })
   it('ships a safe default workflow label', () => {
     expect(messages.en.nav.preview).toBe('Virtual preview')

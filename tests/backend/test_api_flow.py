@@ -154,6 +154,17 @@ def test_schedule_and_duplicate_candidates(client, media_root: Path) -> None:
     assert client.delete(f"/api/schedules/{schedule_id}").status_code == 204
 
 
+def test_workflow_capability_manifest_exposes_ui_schemas(client) -> None:
+    response = client.get("/api/workflow-capabilities")
+    assert response.status_code == 200
+    manifest = response.json()
+    assert manifest["schema_version"] == 1
+    actions = {item["kind"]: item for item in manifest["actions"]}
+    assert actions["clean_name"]["option_schema"]["remove_words"]["control"] == "tags"
+    processors = {item["id"]: item for item in manifest["processors"]}
+    assert processors["detect_junk"]["option_schema"]["filename_contains"]["title_key"] == "workflow.junk.keywords"
+
+
 def test_review_decisions_gate_and_override_plan_operations(client, media_root: Path) -> None:
     (media_root / "prefix-Example.MP4").write_bytes(b"content")
     source_id, _ = create_source_and_scan(client, media_root)
