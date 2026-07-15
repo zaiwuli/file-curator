@@ -95,3 +95,15 @@ test('desktop shell has named controls and no horizontal overflow', async ({ pag
   await expect(page.getByRole('button', { name: '添加规则' })).toBeVisible()
   await expect(page.getByText('冻结计划并确认前，真实文件保持不变。')).toBeVisible()
 })
+
+test('template selection opens its first configured stage', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByText('API connected')).toBeVisible()
+  await page.getByRole('button', { name: 'Pipeline' }).click()
+  await page.getByRole('button', {
+    name: 'Archive by year and month Extract dates and archive within the source. 2 rules',
+  }).click()
+
+  await expect(page.getByRole('heading', { name: 'Extract information' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '1 Extract all dates Extract all dates On' })).toBeVisible()
+})
