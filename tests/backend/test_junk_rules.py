@@ -2,7 +2,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from file_curator.junk_rules import DEFAULT_JUNK_PACK, evaluate_junk
+from file_curator.junk_rules import (
+    DEFAULT_JUNK_PACK,
+    JunkRule,
+    JunkRulePack,
+    evaluate_junk,
+    evaluate_junk_packs,
+)
 from file_curator.processors import ProcessingContext
 from file_curator.schemas import (
     Condition,
@@ -59,6 +65,13 @@ def test_junk_pack_endpoint_and_validation(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json()["valid"] is False
     assert "junk.invalid_regex:bad" in response.json()["errors"]
+    unbounded = client.post("/api/junk-rule-packs/validate", json={
+        "id": "unsafe",
+        "name": "Unsafe",
+        "rules": [{"id": "all", "name": "Everything", "action": "quarantine"}],
+    }).json()
+    assert unbounded["valid"] is False
+    assert "junk.unbounded_quarantine_rule:all" in unbounded["errors"]
 
 
 def test_custom_junk_processor_options_are_supported() -> None:
@@ -70,6 +83,159 @@ def test_custom_junk_processor_options_are_supported() -> None:
     )
     assert result.fields["junk_candidate"] is True
     assert result.fields["junk_action"] == "quarantine"
+
+
+def test_independent_rule_actions_and_cross_pack_whitelist() -> None:
+    quarantine_pack = JunkRulePack(
+        id="custom-quarantine",
+        version="1",
+        name="Custom quarantine",
+        description="",
+        rules=(JunkRule(
+            "custom.ad", "Advertisement", "", "quarantine", 40,
+            filename_contains=("promo",),
+        ),),
+        protected_extensions=(),
+    )
+    review_pack = JunkRulePack(
+        id="custom-review",
+        version="1",
+        name="Custom review",
+        description="",
+        rules=(JunkRule(
+            "custom.sample", "Sample", "", "review", 20,
+            filename_contains=("sample",),
+        ),),
+        protected_extensions=(".nfo",),
+    )
+    result = evaluate_junk_packs(item("promo-sample.txt"), (quarantine_pack, review_pack))
+    assert result.action == "quarantine"
+    assert {evidence.rule_id for evidence in result.evidence} == {
+        "custom-quarantine:custom.ad", "custom-review:custom.sample",
+    }
+    protected = evaluate_junk_packs(item("promo.nfo"), (quarantine_pack, review_pack))
+    assert protected.protected is True
+    assert protected.candidate is False
+
+
+def test_personal_rule_pack_versions_copy_and_workflow_snapshot(client: TestClient) -> None:
+    created = client.post("/api/junk-rule-packs", json={
+        "name": "Personal advertisements",
+        "description": "My reusable rules",
+        "protected_extensions": [".nfo"],
+        "rules": [
+            {
+                "id": "personal.keyword",
+                "name": "Promotion keyword",
+                "action": "quarantine",
+                "score": 60,
+                "filename_contains": ["tracker.example"],
+            },
+            {
+                "id": "personal.sample",
+                "name": "Sample review",
+                "action": "review",
+                "score": 20,
+                "filename_contains": ["sample"],
+            },
+        ],
+    })
+    assert created.status_code == 201, created.text
+    pack = created.json()
+    assert pack["source"] == "personal"
+    assert pack["current_version"] == 1
+
+    updated_payload = {
+        **pack,
+        "name": "Personal advertisements v2",
+        "change_note": "Add temporary extension",
+    }
+    updated_payload["rules"][0]["extensions"] = [".ad"]
+    updated = client.put(f"/api/junk-rule-packs/{pack['id']}", json=updated_payload)
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["current_version"] == 2
+    old = client.get(f"/api/junk-rule-packs/{pack['id']}", params={"version": 1}).json()
+    assert old["rules"][0]["extensions"] == []
+    versions = client.get(f"/api/junk-rule-packs/{pack['id']}/versions").json()
+    assert [item["version"] for item in versions] == [2, 1]
+
+    copied = client.post(f"/api/junk-rule-packs/{pack['id']}/copy")
+    assert copied.status_code == 201, copied.text
+    assert copied.json()["id"] != pack["id"]
+    assert copied.json()["read_only"] is False
+
+    workflow = client.post("/api/workflows", json={"name": "Pack workflow"}).json()
+    applied = client.post(
+        f"/api/junk-rule-packs/{pack['id']}/apply",
+        json={"workflow_id": workflow["id"], "version": 1},
+    )
+    assert applied.status_code == 200, applied.text
+    exported = client.get(
+        f"/api/workflow-templates/{workflow['id']}/export", params={"format": "json"}
+    ).json()
+    actions = [
+        action
+        for stage in exported["stages"]
+        for rule in stage["rules"]
+        for action in rule["actions"]
+    ]
+    detector = next(
+        action for action in actions
+        if action["options"].get("processor_id") == "detect_junk"
+    )
+    assert detector["options"]["rule_pack_refs"] == [
+        {"id": pack["id"], "version": "1"}
+    ]
+    assert detector["options"]["rule_packs"][0]["name"] == "Personal advertisements"
+    assert any(action["kind"] == "quarantine" for action in actions)
+
+
+def test_applying_pack_migrates_legacy_workflow_junk_options(client: TestClient) -> None:
+    template = WorkflowTemplateV2(
+        name="Legacy junk options",
+        stages=[
+            WorkflowStage(
+                id="classify",
+                rules=[RuleCard(
+                    id="classify.legacy",
+                    name="Legacy detector",
+                    actions=[WorkflowAction(
+                        kind="run_processor",
+                        options={
+                            "processor_id": "detect_junk",
+                            "filename_contains": ["legacy-ad"],
+                            "extensions": [".legacy"],
+                            "protected_extensions": [".safe"],
+                        },
+                    )],
+                )],
+            )
+        ],
+    )
+    workflow = client.post(
+        "/api/workflow-templates/import",
+        json={"content": dump_template(template, "json"), "format": "json"},
+    ).json()
+    applied = client.post(
+        f"/api/junk-rule-packs/{DEFAULT_JUNK_PACK.id}/apply",
+        json={"workflow_id": workflow["id"]},
+    )
+    assert applied.status_code == 200, applied.text
+    exported = client.get(
+        f"/api/workflow-templates/{workflow['id']}/export", params={"format": "json"}
+    ).json()
+    detector = next(
+        action
+        for stage in exported["stages"]
+        for rule in stage["rules"]
+        for action in rule["actions"]
+        if action["options"].get("processor_id") == "detect_junk"
+    )
+    snapshots = detector["options"]["rule_packs"]
+    migrated = next(item for item in snapshots if item["id"].startswith("workflow-legacy-"))
+    assert migrated["protected_extensions"] == [".safe"]
+    assert migrated["rules"][0]["extensions"] == [".legacy"]
+    assert migrated["rules"][1]["filename_contains"] == ["legacy-ad"]
 
 
 def test_bt_rule_processor_records_explainable_evidence() -> None:

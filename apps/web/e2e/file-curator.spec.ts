@@ -132,16 +132,16 @@ test('template selection opens its first configured stage', async ({ page }) => 
   await expect(page.getByRole('button', { name: '1 Extract all dates Extract all dates On' })).toBeVisible()
 })
 
-test('custom junk and filename cleanup fields are available', async ({ page }) => {
+test('workflow delegates junk packs and keeps filename cleanup forms', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText('API connected')).toBeVisible()
   await page.getByRole('button', { name: 'Pipeline' }).click()
   await page.getByRole('button', { name: 'Build manually' }).click()
 
   await page.getByRole('button', { name: 'Detect and quarantine BT advertisements' }).click()
-  await expect(page.getByLabel('Additional junk keywords')).toBeVisible()
-  await expect(page.getByLabel('Additional junk file extensions')).toBeVisible()
-  await expect(page.getByLabel('Protected extension whitelist')).toBeVisible()
+  await expect(page.getByText('Reusable junk rule packs')).toBeVisible()
+  await expect(page.getByText('Manage junk rules from the Junk rules navigation page.')).toBeVisible()
+  await expect(page.getByLabel('Additional junk keywords')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Remove advertisement words' }).click()
   await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
@@ -154,7 +154,8 @@ test('custom junk and filename cleanup fields are available', async ({ page }) =
   await expect(page.getByText('Developer options (JSON)')).toHaveCount(0)
 })
 
-test('junk rule library saves manual values to a workflow revision', async ({ page, request }) => {
+test('junk rule library versions independent rules and applies a snapshot', async ({ page, request }) => {
+  const packName = `E2E reusable advertisements ${Date.now()}`
   const workflow = await (await request.post('/api/workflows', {
     data: { name: `E2E junk rules ${Date.now()}`, processors: [] },
   })).json()
@@ -162,16 +163,32 @@ test('junk rule library saves manual values to a workflow revision', async ({ pa
   await page.goto('/')
   await expect(page.getByText('API connected')).toBeVisible()
   await page.getByRole('button', { name: 'Junk rules' }).click()
-  await page.getByLabel('Target workflow').selectOption(workflow.id)
-  const keywords = page.getByLabel('Additional junk keywords')
-  await expect(keywords).toBeVisible()
+  await page.getByRole('button', { name: 'New rule pack' }).click()
+  await page.getByLabel('Rule pack name').fill(packName)
+  await page.getByLabel('Rule name').fill('Quarantine tracker advertisement')
+  await page.getByLabel('Action').selectOption('quarantine')
+  await page.getByLabel('Evidence score').fill('65')
+  const keywords = page.getByLabel('File name keywords')
   await keywords.fill('tracker.example')
   await keywords.press('Enter')
-  const extensions = page.getByLabel('Additional junk file extensions')
-  await extensions.fill('.ad')
-  await extensions.press('Enter')
-  await page.getByRole('button', { name: 'Save to workflow' }).click()
-  await expect(page.getByText('Junk rules saved to workflow')).toBeVisible()
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  await page.getByLabel('Rule name').fill('Review sample files')
+  await page.getByLabel('Action').selectOption('review')
+  const sampleKeywords = page.getByLabel('File name keywords')
+  await sampleKeywords.fill('sample')
+  await sampleKeywords.press('Enter')
+  await page.getByRole('button', { name: 'Save new version' }).click()
+  await expect(page.getByText('Junk rule pack saved')).toBeVisible()
+
+  const packs = await (await request.get('/api/junk-rule-packs')).json()
+  const pack = packs.find((item: {name:string}) => item.name === packName)
+  expect(pack.rules).toHaveLength(2)
+  expect(pack.rules[0]).toMatchObject({action:'quarantine',filename_contains:['tracker.example']})
+  expect(pack.rules[1]).toMatchObject({action:'review',filename_contains:['sample']})
+
+  await page.getByLabel('Target workflow').selectOption(workflow.id)
+  await page.getByRole('button', { name: 'Apply selected version' }).click()
+  await expect(page.getByText('Junk rule pack applied to workflow')).toBeVisible()
 
   await expect.poll(async () => {
     const response = await request.get(`/api/workflow-templates/${workflow.id}/export?format=json`)
@@ -179,5 +196,5 @@ test('junk rule library saves manual values to a workflow revision', async ({ pa
     const actions = template.stages.flatMap((stage: {rules:{actions:{options:Record<string,unknown>}[]}[]}) => stage.rules.flatMap(rule => rule.actions))
     const options = actions.find((action: {options:Record<string,unknown>}) => action.options.processor_id === 'detect_junk')?.options
     return options
-  }).toMatchObject({ filename_contains: ['tracker.example'], extensions: ['.ad'] })
+  }).toMatchObject({ rule_pack_refs: [{id:pack.id,version:'1'}] })
 })

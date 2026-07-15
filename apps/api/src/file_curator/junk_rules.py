@@ -1,7 +1,7 @@
 """Deterministic metadata rules for junk and advertisement candidates."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from .processors import ProcessingContext
@@ -23,6 +23,9 @@ class JunkRule:
     max_size: int | None = None
     min_size: int | None = None
     empty_only: bool = False
+    enabled: bool = True
+    order: int = 0
+    stop_on_match: bool = False
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,9 @@ class JunkRulePack:
     description: str
     rules: tuple[JunkRule, ...]
     protected_extensions: tuple[str, ...] = (".srt", ".ass", ".ssa", ".nfo")
+    protected_names: tuple[str, ...] = ()
+    protected_paths: tuple[str, ...] = ()
+    source: Literal["built_in", "personal", "snapshot"] = "built_in"
 
 
 @dataclass(frozen=True)
@@ -83,15 +89,25 @@ def _rule_matches(rule: JunkRule, context: ProcessingContext) -> str | None:
 
 
 def evaluate_junk(context: ProcessingContext, pack: JunkRulePack) -> JunkEvaluation:
-    protected = context.extension.casefold() in {value.casefold() for value in pack.protected_extensions}
+    protected = (
+        context.extension.casefold() in {value.casefold() for value in pack.protected_extensions}
+        or any(value.casefold() in context.original_name.casefold() for value in pack.protected_names)
+        or any(value.casefold() in context.relative_path.casefold() for value in pack.protected_paths)
+    )
     evidence: list[JunkEvidence] = []
-    for rule in pack.rules:
+    for rule in sorted(pack.rules, key=lambda item: item.order):
+        if not rule.enabled:
+            continue
         matched_value = _rule_matches(rule, context)
         if matched_value is None:
             continue
+        if rule.action == "keep":
+            return JunkEvaluation(False, "keep", 0, (), True)
         if protected:
             continue
         evidence.append(JunkEvidence(rule.id, rule.action, rule.score, f"junk.{rule.id}", matched_value))
+        if rule.stop_on_match:
+            break
     text_signals = context.fields.get("text_signals", [])
     if not protected and text_signals:
         evidence.append(JunkEvidence(
@@ -112,13 +128,77 @@ def evaluate_junk(context: ProcessingContext, pack: JunkRulePack) -> JunkEvaluat
             f"{duplicate_count}:{directory_count}",
         ))
     score = min(100, sum(item.score for item in evidence))
-    if any(item.action == "quarantine" for item in evidence) and score >= 50:
+    if any(item.action == "quarantine" for item in evidence):
         action: JunkAction = "quarantine"
-    elif evidence:
+    elif any(item.action == "review" for item in evidence):
         action = "review"
     else:
         action = "keep"
     return JunkEvaluation(bool(evidence), action, score, tuple(evidence), protected)
+
+
+def junk_pack_from_dict(value: dict[str, Any]) -> JunkRulePack:
+    rules = tuple(
+        JunkRule(
+            id=str(item["id"]),
+            name=str(item["name"]),
+            description=str(item.get("description", "")),
+            action=item.get("action", "review"),
+            score=int(item.get("score", 0)),
+            extensions=tuple(item.get("extensions", ())),
+            filename_contains=tuple(item.get("filename_contains", ())),
+            filename_regex=tuple(item.get("filename_regex", ())),
+            path_contains=tuple(item.get("path_contains", ())),
+            max_size=item.get("max_size"),
+            min_size=item.get("min_size"),
+            empty_only=bool(item.get("empty_only", False)),
+            enabled=bool(item.get("enabled", True)),
+            order=int(item.get("order", 0)),
+            stop_on_match=bool(item.get("stop_on_match", False)),
+        )
+        for item in value.get("rules", ())
+    )
+    return JunkRulePack(
+        id=str(value["id"]),
+        version=str(value.get("version", "1")),
+        name=str(value["name"]),
+        description=str(value.get("description", "")),
+        rules=rules,
+        protected_extensions=tuple(value.get("protected_extensions", ())),
+        protected_names=tuple(value.get("protected_names", ())),
+        protected_paths=tuple(value.get("protected_paths", ())),
+        source=value.get("source", "snapshot"),
+    )
+
+
+def evaluate_junk_packs(
+    context: ProcessingContext, packs: tuple[JunkRulePack, ...]
+) -> JunkEvaluation:
+    if not packs:
+        return JunkEvaluation(False, "keep", 0, (), False)
+    combined_rules = tuple(
+        replace(
+            rule,
+            id=f"{pack.id}:{rule.id}",
+            order=pack_order * 10_000 + rule_order,
+        )
+        for pack_order, pack in enumerate(packs)
+        for rule_order, rule in enumerate(sorted(pack.rules, key=lambda item: item.order))
+    )
+    combined = JunkRulePack(
+        id="combined",
+        version="snapshot",
+        name="Combined junk rules",
+        description="",
+        rules=combined_rules,
+        protected_extensions=tuple(
+            value for pack in packs for value in pack.protected_extensions
+        ),
+        protected_names=tuple(value for pack in packs for value in pack.protected_names),
+        protected_paths=tuple(value for pack in packs for value in pack.protected_paths),
+        source="snapshot",
+    )
+    return evaluate_junk(context, combined)
 
 
 DEFAULT_JUNK_PACK = JunkRulePack(
@@ -146,11 +226,18 @@ def junk_pack_dict(pack: JunkRulePack) -> dict[str, Any]:
         "name": pack.name,
         "description": pack.description,
         "protected_extensions": list(pack.protected_extensions),
+        "protected_names": list(pack.protected_names),
+        "protected_paths": list(pack.protected_paths),
+        "source": pack.source,
+        "read_only": pack.source == "built_in",
+        "current_version": int(pack.version.split(".")[0]) if pack.version.split(".")[0].isdigit() else 1,
         "rules": [
             {
                 "id": rule.id,
                 "name": rule.name,
                 "description": rule.description,
+                "enabled": rule.enabled,
+                "order": position,
                 "action": rule.action,
                 "score": rule.score,
                 "extensions": list(rule.extensions),
@@ -160,7 +247,8 @@ def junk_pack_dict(pack: JunkRulePack) -> dict[str, Any]:
                 "max_size": rule.max_size,
                 "min_size": rule.min_size,
                 "empty_only": rule.empty_only,
+                "stop_on_match": rule.stop_on_match,
             }
-            for rule in pack.rules
+            for position, rule in enumerate(pack.rules)
         ],
     }

@@ -95,6 +95,8 @@ class JunkRule(BaseModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
+    enabled: bool = True
+    order: int = Field(default=0, ge=0)
     action: Literal["keep", "review", "quarantine"] = "review"
     score: int = Field(default=0, ge=0, le=100)
     extensions: list[str] = []
@@ -104,6 +106,7 @@ class JunkRule(BaseModel):
     max_size: int | None = Field(default=None, ge=0)
     min_size: int | None = Field(default=None, ge=0)
     empty_only: bool = False
+    stop_on_match: bool = False
 
 
 class JunkRulePack(BaseModel):
@@ -112,7 +115,34 @@ class JunkRulePack(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     protected_extensions: list[str] = [".srt", ".ass", ".ssa", ".nfo"]
+    protected_names: list[str] = []
+    protected_paths: list[str] = []
     rules: list[JunkRule] = []
+    source: Literal["built_in", "personal", "snapshot"] = "built_in"
+    read_only: bool = True
+    current_version: int = 1
+
+
+class JunkRulePackWrite(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    protected_extensions: list[str] = [".srt", ".ass", ".ssa", ".nfo"]
+    protected_names: list[str] = []
+    protected_paths: list[str] = []
+    rules: list[JunkRule] = []
+    change_note: str = Field(default="", max_length=1000)
+
+
+class JunkRulePackVersionRead(ORMModel):
+    pack_id: str
+    version: int
+    change_note: str
+    created_at: datetime
+
+
+class JunkRulePackApply(BaseModel):
+    workflow_id: str
+    version: int | None = Field(default=None, ge=1)
 
 
 class JunkRulePackValidation(BaseModel):

@@ -126,6 +126,30 @@ class WorkflowRevision(Base, TimestampMixin):
     workflow: Mapped[Workflow] = relationship(back_populates="revisions")
 
 
+class JunkRulePackRecord(Base, TimestampMixin):
+    __tablename__ = "junk_rule_packs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    versions: Mapped[list["JunkRulePackVersion"]] = relationship(
+        back_populates="pack", cascade="all, delete-orphan"
+    )
+
+
+class JunkRulePackVersion(Base, TimestampMixin):
+    __tablename__ = "junk_rule_pack_versions"
+    __table_args__ = (UniqueConstraint("pack_id", "version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    pack_id: Mapped[str] = mapped_column(
+        ForeignKey("junk_rule_packs.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    change_note: Mapped[str] = mapped_column(Text, default="")
+    pack: Mapped[JunkRulePackRecord] = relationship(back_populates="versions")
+
+
 class PipelineRun(Base, TimestampMixin):
     __tablename__ = "pipeline_runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

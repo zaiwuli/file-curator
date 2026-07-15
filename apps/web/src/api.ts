@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, JunkRulePackVersion, JunkRulePackWrite, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -28,6 +28,13 @@ export const api = {
   processors: () => request<ProcessorManifest[]>('/processors'),
   workflowCapabilities: () => request<WorkflowCapabilityManifest>('/workflow-capabilities'),
   junkRulePacks: () => request<JunkRulePack[]>('/junk-rule-packs'),
+  junkRulePack: (id:string,version?:number) => request<JunkRulePack>(`/junk-rule-packs/${id}${version?`?version=${version}`:''}`),
+  junkRulePackVersions: (id:string) => request<JunkRulePackVersion[]>(`/junk-rule-packs/${id}/versions`),
+  createJunkRulePack: (pack:JunkRulePackWrite) => post<JunkRulePack>('/junk-rule-packs',pack),
+  updateJunkRulePack: (id:string,pack:JunkRulePackWrite) => request<JunkRulePack>(`/junk-rule-packs/${id}`,{method:'PUT',body:JSON.stringify(pack)}),
+  copyJunkRulePack: (id:string) => post<JunkRulePack>(`/junk-rule-packs/${id}/copy`),
+  deleteJunkRulePack: (id:string) => request<void>(`/junk-rule-packs/${id}`,{method:'DELETE'}),
+  applyJunkRulePack: (id:string,workflowId:string,version?:number) => post<Workflow>(`/junk-rule-packs/${id}/apply`,{workflow_id:workflowId,version}),
   validateJunkRulePack: (pack: unknown) => post<JunkRulePackValidation>('/junk-rule-packs/validate', pack),
   workflowTemplates: () => request<WorkflowTemplateV2[]>('/workflow-templates'),
   validateTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto') => post<TemplateValidation>('/workflow-templates/validate', { content, format }),

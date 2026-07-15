@@ -286,12 +286,25 @@ class JunkDetector(Processor):
     defaults = {".tmp", ".part", ".download", ".crdownload"}
 
     def process(self, context: ProcessingContext, options: dict[str, Any]) -> ProcessorResult:
-        from .junk_rules import DEFAULT_JUNK_PACK, evaluate_junk
+        from .junk_rules import (
+            DEFAULT_JUNK_PACK,
+            evaluate_junk,
+            evaluate_junk_packs,
+            junk_pack_from_dict,
+        )
 
         pack = DEFAULT_JUNK_PACK
+        snapshots = options.get("rule_packs", [])
+        if snapshots:
+            packs = tuple(
+                junk_pack_from_dict(item) for item in snapshots if isinstance(item, dict)
+            )
+            evaluation = evaluate_junk_packs(context, packs)
+        else:
+            evaluation = None
         extensions = tuple(options.get("extensions", ()))
         keywords = tuple(options.get("filename_contains", ()))
-        if extensions or keywords or options.get("protected_extensions"):
+        if evaluation is None and (extensions or keywords or options.get("protected_extensions")):
             from .junk_rules import JunkRule, JunkRulePack
 
             rules = list(pack.rules)
@@ -307,13 +320,25 @@ class JunkDetector(Processor):
                 tuple(rules),
                 tuple(options.get("protected_extensions", pack.protected_extensions)),
             )
-        evaluation = evaluate_junk(context, pack)
+        if evaluation is None:
+            evaluation = evaluate_junk(context, pack)
         if not evaluation.candidate:
             return ProcessorResult(status="skipped")
-        evidence = [
-            {"rule_id": item.rule_id, "action": item.action, "score": item.score, "reason": item.reason, "matched_value": item.matched_value}
-            for item in evaluation.evidence
-        ]
+        evidence = []
+        for item in evaluation.evidence:
+            pack_id, rule_id = (
+                item.rule_id.split(":", 1)
+                if ":" in item.rule_id
+                else (pack.id, item.rule_id)
+            )
+            evidence.append({
+                "pack_id": pack_id,
+                "rule_id": rule_id,
+                "action": item.action,
+                "score": item.score,
+                "reason": item.reason,
+                "matched_value": item.matched_value,
+            })
         return ProcessorResult(
             status="review" if evaluation.action == "review" else "matched",
             confidence_delta=min(0.5, evaluation.score / 100),
@@ -322,6 +347,10 @@ class JunkDetector(Processor):
                 "junk_action": evaluation.action,
                 "junk_score": evaluation.score,
                 "junk_evidence": evidence,
+                "junk_rule_pack_versions": [
+                    {"id": item.get("id"), "version": item.get("version")}
+                    for item in snapshots if isinstance(item, dict)
+                ],
             },
             reasons=[item.reason for item in evaluation.evidence],
         )

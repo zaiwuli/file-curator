@@ -20,6 +20,8 @@ from .db import (
     ExecutionBatch,
     FileEntry,
     FileGroup,
+    JunkRulePackRecord,
+    JunkRulePackVersion,
     PipelineRun,
     Plan,
     ReviewDecision,
@@ -37,13 +39,18 @@ from .schemas import (
     AuditRead,
     BackupRead,
     BatchRead,
+    Condition,
+    ConditionGroup,
     DiagnosticsRead,
     DuplicateCandidate,
     FileGroupRead,
     FilePage,
     FileRead,
     JunkRulePack,
+    JunkRulePackApply,
     JunkRulePackValidation,
+    JunkRulePackVersionRead,
+    JunkRulePackWrite,
     ManualPlanCreate,
     PipelineRunCreate,
     PipelineRunRead,
@@ -54,6 +61,7 @@ from .schemas import (
     ReviewDecisionUpsert,
     ReviewItemRead,
     RollbackPreview,
+    RuleCard,
     RuleTestInput,
     RuleTestResult,
     ScanCreate,
@@ -68,6 +76,7 @@ from .schemas import (
     TemplateImportInput,
     TemplateTextInput,
     TemplateValidationResult,
+    WorkflowAction,
     WorkflowCompare,
     WorkflowCreate,
     WorkflowDependency,
@@ -188,12 +197,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def workflow_capabilities() -> dict[str, Any]:
         return workflow_capability_manifest(registry)
 
-    @app.get("/api/junk-rule-packs", response_model=list[JunkRulePack])
-    def junk_rule_packs():
-        return [junk_pack_dict(DEFAULT_JUNK_PACK)]
+    def personal_junk_pack(
+        record: JunkRulePackRecord, version: JunkRulePackVersion
+    ) -> dict[str, Any]:
+        return {
+            **version.payload,
+            "id": record.id,
+            "version": str(version.version),
+            "source": "personal",
+            "read_only": False,
+            "current_version": record.current_version,
+        }
 
-    @app.post("/api/junk-rule-packs/validate", response_model=JunkRulePackValidation)
-    def validate_junk_rule_pack(payload: JunkRulePack):
+    def junk_pack_version(
+        pack_id: str, version: int | None, session: Session
+    ) -> dict[str, Any]:
+        if pack_id == DEFAULT_JUNK_PACK.id:
+            if version not in {None, 1}:
+                raise HTTPException(404, detail="junk_rule_pack_versions.not_found")
+            return junk_pack_dict(DEFAULT_JUNK_PACK)
+        record = require(JunkRulePackRecord, pack_id, session)
+        selected_version = version or record.current_version
+        row = session.query(JunkRulePackVersion).filter_by(
+            pack_id=record.id, version=selected_version
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(404, detail="junk_rule_pack_versions.not_found")
+        return personal_junk_pack(record, row)
+
+    def validate_junk_pack(payload: JunkRulePack) -> JunkRulePackValidation:
         errors: list[str] = []
         warnings: list[str] = []
         seen: set[str] = set()
@@ -206,16 +238,266 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     re.compile(pattern)
                 except re.error:
                     errors.append(f"junk.invalid_regex:{rule.id}")
-            if not rule.extensions and not rule.filename_contains and not rule.filename_regex and not rule.path_contains and not rule.empty_only:
-                warnings.append(f"junk.unbounded_rule:{rule.id}")
+            bounded = (
+                rule.extensions or rule.filename_contains or rule.filename_regex
+                or rule.path_contains or rule.empty_only
+                or rule.max_size is not None or rule.min_size is not None
+            )
+            if not bounded:
+                if rule.action == "quarantine":
+                    errors.append(f"junk.unbounded_quarantine_rule:{rule.id}")
+                else:
+                    warnings.append(f"junk.unbounded_rule:{rule.id}")
+            if rule.min_size is not None and rule.max_size is not None and rule.min_size > rule.max_size:
+                errors.append(f"junk.invalid_size_range:{rule.id}")
         if not payload.rules:
             errors.append("junk.empty_pack")
         return JunkRulePackValidation(
             valid=not errors,
-            errors=errors,
+            errors=sorted(set(errors)),
             warnings=sorted(set(warnings)),
             rule_count=len(payload.rules),
         )
+
+    def write_junk_pack_payload(
+        pack_id: str, version: int, payload: JunkRulePackWrite
+    ) -> dict[str, Any]:
+        value = JunkRulePack(
+            id=pack_id,
+            version=str(version),
+            name=payload.name,
+            description=payload.description,
+            protected_extensions=payload.protected_extensions,
+            protected_names=payload.protected_names,
+            protected_paths=payload.protected_paths,
+            rules=payload.rules,
+            source="personal",
+            read_only=False,
+            current_version=version,
+        )
+        validation = validate_junk_pack(value)
+        if not validation.valid:
+            raise HTTPException(
+                422, detail={"code": "junk.pack_invalid", "errors": validation.errors}
+            )
+        return value.model_dump(mode="json", exclude={"read_only", "current_version"})
+
+    @app.get("/api/junk-rule-packs", response_model=list[JunkRulePack])
+    def junk_rule_packs(session: Session = Depends(session_dependency)):
+        values = [junk_pack_dict(DEFAULT_JUNK_PACK)]
+        records = session.query(JunkRulePackRecord).order_by(JunkRulePackRecord.name).all()
+        for record in records:
+            version = session.query(JunkRulePackVersion).filter_by(
+                pack_id=record.id, version=record.current_version
+            ).one()
+            values.append(personal_junk_pack(record, version))
+        return values
+
+    @app.post("/api/junk-rule-packs/validate", response_model=JunkRulePackValidation)
+    def validate_junk_rule_pack(payload: JunkRulePack):
+        return validate_junk_pack(payload)
+
+    @app.post("/api/junk-rule-packs", response_model=JunkRulePack, status_code=201)
+    def create_junk_rule_pack(
+        payload: JunkRulePackWrite, session: Session = Depends(session_dependency)
+    ):
+        record = JunkRulePackRecord(name=payload.name, description=payload.description)
+        session.add(record)
+        session.flush()
+        value = write_junk_pack_payload(record.id, 1, payload)
+        version = JunkRulePackVersion(
+            pack_id=record.id, version=1, payload=value, change_note=payload.change_note
+        )
+        session.add(version)
+        session.commit()
+        return personal_junk_pack(record, version)
+
+    @app.get(
+        "/api/junk-rule-packs/{pack_id}/versions",
+        response_model=list[JunkRulePackVersionRead],
+    )
+    def list_junk_rule_pack_versions(
+        pack_id: str, session: Session = Depends(session_dependency)
+    ):
+        if pack_id == DEFAULT_JUNK_PACK.id:
+            return [{
+                "pack_id": pack_id, "version": 1, "change_note": "Built-in version",
+                "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+            }]
+        require(JunkRulePackRecord, pack_id, session)
+        return session.query(JunkRulePackVersion).filter_by(pack_id=pack_id).order_by(
+            JunkRulePackVersion.version.desc()
+        ).all()
+
+    @app.get("/api/junk-rule-packs/{pack_id}", response_model=JunkRulePack)
+    def get_junk_rule_pack(
+        pack_id: str,
+        version: int | None = Query(default=None, ge=1),
+        session: Session = Depends(session_dependency),
+    ):
+        return junk_pack_version(pack_id, version, session)
+
+    @app.put("/api/junk-rule-packs/{pack_id}", response_model=JunkRulePack)
+    def update_junk_rule_pack(
+        pack_id: str,
+        payload: JunkRulePackWrite,
+        session: Session = Depends(session_dependency),
+    ):
+        if pack_id == DEFAULT_JUNK_PACK.id:
+            raise HTTPException(400, detail="junk.builtin_read_only")
+        record = require(JunkRulePackRecord, pack_id, session)
+        next_version = record.current_version + 1
+        value = write_junk_pack_payload(record.id, next_version, payload)
+        record.name = payload.name
+        record.description = payload.description
+        record.current_version = next_version
+        version = JunkRulePackVersion(
+            pack_id=record.id,
+            version=next_version,
+            payload=value,
+            change_note=payload.change_note,
+        )
+        session.add(version)
+        session.commit()
+        return personal_junk_pack(record, version)
+
+    @app.post("/api/junk-rule-packs/{pack_id}/copy", response_model=JunkRulePack, status_code=201)
+    def copy_junk_rule_pack(
+        pack_id: str, session: Session = Depends(session_dependency)
+    ):
+        source = junk_pack_version(pack_id, None, session)
+        payload = JunkRulePackWrite.model_validate({
+            **source,
+            "name": f"{source['name']} copy",
+            "change_note": f"Copied from {pack_id}",
+        })
+        record = JunkRulePackRecord(name=payload.name, description=payload.description)
+        session.add(record)
+        session.flush()
+        value = write_junk_pack_payload(record.id, 1, payload)
+        version = JunkRulePackVersion(
+            pack_id=record.id, version=1, payload=value, change_note=payload.change_note
+        )
+        session.add(version)
+        session.commit()
+        return personal_junk_pack(record, version)
+
+    @app.delete("/api/junk-rule-packs/{pack_id}", status_code=204)
+    def delete_junk_rule_pack(
+        pack_id: str, session: Session = Depends(session_dependency)
+    ):
+        if pack_id == DEFAULT_JUNK_PACK.id:
+            raise HTTPException(400, detail="junk.builtin_read_only")
+        session.delete(require(JunkRulePackRecord, pack_id, session))
+        session.commit()
+
+    @app.post("/api/junk-rule-packs/{pack_id}/apply", response_model=WorkflowRead)
+    def apply_junk_rule_pack(
+        pack_id: str,
+        payload: JunkRulePackApply,
+        session: Session = Depends(session_dependency),
+    ):
+        snapshot = junk_pack_version(pack_id, payload.version, session)
+        snapshot["source"] = "snapshot"
+        snapshot["read_only"] = True
+        workflow = require(Workflow, payload.workflow_id, session)
+        revision = get_revision(session, workflow)
+        template = template_from_revision(
+            workflow.name, workflow.preset, workflow.review_policy, revision.config
+        )
+        detector: Any = None
+        for stage in template.stages:
+            for rule in stage.rules:
+                for action in rule.actions:
+                    if action.kind == "run_processor" and action.options.get("processor_id") == "detect_junk":
+                        detector = action
+                        break
+        if detector is None:
+            classify_stage = next(
+                (item for item in template.stages if item.id == "classify"), None
+            )
+            if classify_stage is None:
+                classify_stage = WorkflowStage(id="classify")
+                template.stages.append(classify_stage)
+            rule = RuleCard(
+                id=f"classify.junk.{len(classify_stage.rules)}",
+                name="Detect junk and advertisements",
+                order=len(classify_stage.rules),
+                actions=[WorkflowAction(kind="run_processor", options={"processor_id": "detect_junk"})],
+            )
+            classify_stage.rules.append(rule)
+            detector = rule.actions[0]
+        legacy_extensions = list(detector.options.get("extensions", []))
+        legacy_keywords = list(detector.options.get("filename_contains", []))
+        legacy_protected = list(detector.options.get("protected_extensions", []))
+        snapshots = [
+            item for item in detector.options.get("rule_packs", [])
+            if isinstance(item, dict) and item.get("id") != pack_id
+        ]
+        legacy_id = f"workflow-legacy-{workflow.id}"
+        if (legacy_extensions or legacy_keywords or legacy_protected) and not any(
+            item.get("id") == legacy_id for item in snapshots
+        ):
+            legacy_rules: list[dict[str, Any]] = []
+            if legacy_extensions:
+                legacy_rules.append({
+                    "id": "legacy.extensions", "name": "Migrated extensions",
+                    "description": "Migrated from workflow processor options.",
+                    "enabled": True, "order": 0, "action": "quarantine", "score": 70,
+                    "extensions": legacy_extensions, "filename_contains": [],
+                    "filename_regex": [], "path_contains": [], "max_size": None,
+                    "min_size": None, "empty_only": False, "stop_on_match": False,
+                })
+            if legacy_keywords:
+                legacy_rules.append({
+                    "id": "legacy.keywords", "name": "Migrated keywords",
+                    "description": "Migrated from workflow processor options.",
+                    "enabled": True, "order": len(legacy_rules), "action": "quarantine",
+                    "score": 55, "extensions": [], "filename_contains": legacy_keywords,
+                    "filename_regex": [], "path_contains": [], "max_size": None,
+                    "min_size": None, "empty_only": False, "stop_on_match": False,
+                })
+            snapshots.append({
+                "id": legacy_id, "version": "1", "name": "Migrated workflow junk rules",
+                "description": "Compatibility snapshot for legacy processor options.",
+                "protected_extensions": legacy_protected,
+                "protected_names": [], "protected_paths": [], "rules": legacy_rules,
+                "source": "snapshot", "read_only": True, "current_version": 1,
+            })
+        detector.options["rule_packs"] = [*snapshots, snapshot]
+        detector.options["rule_pack_refs"] = [
+            {"id": item.get("id"), "version": item.get("version")}
+            for item in detector.options["rule_packs"]
+        ]
+        target = next((item for item in template.stages if item.id == "target"), None)
+        if target is None:
+            target = WorkflowStage(id="target")
+            template.stages.append(target)
+        if not any(rule.id.startswith("target.junk") for rule in target.rules):
+            target.rules.append(RuleCard(
+                id=f"target.junk.{len(target.rules)}",
+                name="Quarantine junk candidates",
+                order=len(target.rules),
+                conditions=ConditionGroup(conditions=[
+                    Condition(field="junk_action", operator="equals", value="quarantine")
+                ]),
+                actions=[WorkflowAction(kind="quarantine"), WorkflowAction(kind="require_review")],
+            ))
+        workflow.current_revision += 1
+        session.add(WorkflowRevision(
+            workflow_id=workflow.id,
+            revision=workflow.current_revision,
+            config={
+                "template": template.model_dump(mode="json"),
+                "processors": [item.model_dump() for item in processors_from_template(template)],
+            },
+        ))
+        stale_runs = select(PipelineRun.id).where(PipelineRun.workflow_id == workflow.id)
+        session.query(Plan).filter(
+            Plan.run_id.in_(stale_runs), Plan.status == "draft"
+        ).update({"status": "invalidated"}, synchronize_session=False)
+        session.commit()
+        return workflow
 
     @app.get("/api/workflow-templates", response_model=list[WorkflowTemplateV2])
     def list_builtin_templates():
