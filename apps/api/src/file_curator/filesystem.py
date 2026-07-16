@@ -14,8 +14,20 @@ class FileSafetyError(RuntimeError):
         self.code = code
 
 
+def resolved_path(path: Path, *, strict: bool) -> Path:
+    try:
+        return path.resolve(strict=strict)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1005:
+            raise
+        fallback = Path(os.path.abspath(path))
+        if strict and not fallback.exists():
+            raise FileNotFoundError(fallback) from exc
+        return fallback
+
+
 def normalize_root(path: str | Path) -> Path:
-    root = Path(path).expanduser().resolve(strict=True)
+    root = resolved_path(Path(path).expanduser(), strict=True)
     if not root.is_dir():
         raise FileSafetyError("source.not_directory")
     return root
@@ -37,9 +49,9 @@ def safe_relative(value: str) -> Path:
 
 
 def resolve_inside(root: Path, relative: str, *, strict: bool = False) -> Path:
-    candidate = (root / safe_relative(relative)).resolve(strict=strict)
+    candidate = resolved_path(root / safe_relative(relative), strict=strict)
     try:
-        candidate.relative_to(root.resolve(strict=True))
+        candidate.relative_to(resolved_path(root, strict=True))
     except ValueError as exc:
         raise FileSafetyError("path.outside_source") from exc
     return candidate
