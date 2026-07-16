@@ -76,12 +76,16 @@ def test_pipeline_plan_execute_and_rollback(client, media_root: Path) -> None:
     )
     renamed = media_root / "ABC-123 title.mp4"
     assert renamed.exists() and not original.exists()
+    indexed = client.get("/api/files", params={"source_id": source_id}).json()
+    assert [item["relative_path"] for item in indexed] == ["ABC-123 title.mp4"]
     rollback_preview = client.get(f"/api/batches/{batch['id']}/rollback-preview").json()
     assert rollback_preview["ready"] is True
     assert rollback_preview["operations"][0]["ready"] is True
     rollback = client.post(f"/api/batches/{batch['id']}/rollback")
     assert rollback.status_code == 200, rollback.text
     assert original.exists() and not renamed.exists()
+    indexed = client.get("/api/files", params={"source_id": source_id}).json()
+    assert [item["relative_path"] for item in indexed] == [original.name]
 
 
 def test_freeze_rejects_extension_change(client, media_root: Path) -> None:
@@ -108,6 +112,49 @@ def test_freeze_rejects_extension_change(client, media_root: Path) -> None:
     response = client.post(f"/api/plans/{plan['id']}/freeze")
     assert response.status_code == 400
     assert response.json()["detail"] == "operation.extension_changed"
+
+
+def test_directory_move_updates_and_rolls_back_index(client, media_root: Path) -> None:
+    folder = media_root / "Folder.v1"
+    folder.mkdir()
+    (folder / "movie.mp4").write_bytes(b"content")
+    source_id, _ = create_source_and_scan(client, media_root)
+    workflow = client.post("/api/workflows", json={"name": "Directory move"}).json()
+    run = client.post(
+        "/api/pipeline-runs", json={"source_id": source_id, "workflow_id": workflow["id"]}
+    ).json()
+    plan = client.post(
+        "/api/plans/manual",
+        json={
+            "run_id": run["id"],
+            "operations": [
+                {
+                    "kind": "move",
+                    "source_relative_path": "Folder.v1",
+                    "target_relative_path": "Archive/Folder cleaned",
+                }
+            ],
+        },
+    ).json()
+    client.post(f"/api/plans/{plan['id']}/freeze")
+    client.post(f"/api/plans/{plan['id']}/confirm")
+    batch = client.post("/api/batches", params={"plan_id": plan["id"]}).json()
+    result = wait_for(client, f"/api/batches/{batch['id']}", {"completed", "failed"})
+
+    assert result["status"] == "completed"
+    indexed = client.get("/api/files", params={"source_id": source_id}).json()
+    assert {item["relative_path"] for item in indexed} == {
+        "Archive/Folder cleaned",
+        "Archive/Folder cleaned/movie.mp4",
+    }
+
+    rollback = client.post(f"/api/batches/{batch['id']}/rollback")
+    assert rollback.status_code == 200, rollback.text
+    indexed = client.get("/api/files", params={"source_id": source_id}).json()
+    assert {item["relative_path"] for item in indexed} == {
+        "Folder.v1",
+        "Folder.v1/movie.mp4",
+    }
 
 
 def test_schedule_and_duplicate_candidates(client, media_root: Path) -> None:

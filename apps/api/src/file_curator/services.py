@@ -508,12 +508,13 @@ def preflight_plan(session: Session, plan: Plan) -> dict[str, int | str]:
         if target_path.exists() and target_path != source_path:
             raise DomainError("operation.target_exists")
         stat = source_path.stat()
-        if not source_path.is_dir() and (
+        source_is_dir = source_path.is_dir()
+        if not source_is_dir and (
             stat.st_size != operation.expected_size
             or stat.st_mtime_ns != operation.expected_mtime_ns
         ):
             raise DomainError("operation.source_changed")
-        if (
+        if not source_is_dir and (
             Path(operation.source_relative_path).suffix.lower()
             != Path(operation.target_relative_path).suffix.lower()
         ):
@@ -564,6 +565,38 @@ def queue_plan_execution(session: Session, plan: Plan) -> ExecutionBatch:
     return batch
 
 
+def update_indexed_path(
+    session: Session,
+    source_id: str,
+    source_relative_path: str,
+    target_relative_path: str,
+) -> None:
+    entry = session.query(FileEntry).filter_by(
+        source_id=source_id,
+        relative_path=source_relative_path,
+        active=True,
+    ).one_or_none()
+    if entry is None:
+        return
+    entries = [entry]
+    if entry.is_dir:
+        prefix = f"{source_relative_path.rstrip('/')}/"
+        entries.extend(
+            session.query(FileEntry).filter(
+                FileEntry.source_id == source_id,
+                FileEntry.active.is_(True),
+                FileEntry.relative_path.startswith(prefix, autoescape=True),
+            )
+        )
+    for indexed in entries:
+        suffix = indexed.relative_path[len(source_relative_path) :]
+        target = Path(f"{target_relative_path}{suffix}")
+        indexed.relative_path = target.as_posix()
+        indexed.parent_path = "" if target.parent == Path(".") else target.parent.as_posix()
+        indexed.name = target.name
+        indexed.extension = target.suffix.casefold() if not indexed.is_dir else ""
+
+
 def execute_batch(session: Session, batch: ExecutionBatch, settings: Settings) -> ExecutionBatch:
     plan = session.get(Plan, batch.plan_id)
     if not plan:
@@ -611,6 +644,12 @@ def execute_batch(session: Session, batch: ExecutionBatch, settings: Settings) -
                 raise FileSafetyError("operation.verification_failed")
             if not target_path.is_dir() and target_path.stat().st_size != operation.expected_size:
                 raise FileSafetyError("operation.verification_failed")
+            update_indexed_path(
+                session,
+                source.id,
+                operation.source_relative_path,
+                target_relative,
+            )
             batch.succeeded += 1
             successful_ids.add(operation.id)
             session.add(
@@ -681,6 +720,12 @@ def rollback_batch(session: Session, batch: ExecutionBatch) -> ExecutionBatch:
             raise DomainError("rollback.target_exists")
         original.parent.mkdir(parents=True, exist_ok=True)
         current.rename(original)
+        update_indexed_path(
+            session,
+            source.id,
+            current_relative,
+            operation.source_relative_path,
+        )
         session.add(
             AuditLog(
                 batch_id=batch.id,
