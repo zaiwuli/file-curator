@@ -81,18 +81,48 @@ def is_excluded(relative: Path, patterns: list[str]) -> bool:
     )
 
 
-def iter_metadata(root: Path, exclusions: list[str], max_entries: int) -> Iterator[dict[str, Any]]:
+def iter_metadata(
+    root: Path,
+    exclusions: list[str],
+    max_entries: int,
+    on_error: Callable[[Path, OSError], None] | None = None,
+) -> Iterator[dict[str, Any]]:
     pending = [root]
     emitted = 0
     while pending:
         directory = pending.pop()
-        with os.scandir(directory) as iterator:
-            for item in iterator:
-                relative = Path(item.path).relative_to(root)
-                if is_excluded(relative, exclusions):
+        try:
+            iterator_context = os.scandir(directory)
+        except OSError as exc:
+            if on_error:
+                on_error(directory.relative_to(root), exc)
+            continue
+        with iterator_context as iterator:
+            iterator_errors = 0
+            while True:
+                try:
+                    item = next(iterator)
+                except StopIteration:
+                    break
+                except OSError as exc:
+                    iterator_errors += 1
+                    if on_error:
+                        on_error(directory.relative_to(root), exc)
+                    if iterator_errors >= 100:
+                        break
                     continue
-                stat = item.stat(follow_symlinks=False)
-                is_dir = item.is_dir(follow_symlinks=False)
+                iterator_errors = 0
+                relative = Path(item.path).relative_to(root)
+                try:
+                    if is_excluded(relative, exclusions):
+                        continue
+                    stat = item.stat(follow_symlinks=False)
+                    is_dir = item.is_dir(follow_symlinks=False)
+                    is_symlink = item.is_symlink()
+                except OSError as exc:
+                    if on_error:
+                        on_error(relative, exc)
+                    continue
                 yield {
                     "relative_path": relative.as_posix(),
                     "parent_path": relative.parent.as_posix()
@@ -107,7 +137,7 @@ def iter_metadata(root: Path, exclusions: list[str], max_entries: int) -> Iterat
                 emitted += 1
                 if emitted > max_entries:
                     raise FileSafetyError("scan.entry_limit_exceeded")
-                if is_dir and not item.is_symlink():
+                if is_dir and not is_symlink:
                     pending.append(Path(item.path))
 
 
@@ -150,8 +180,18 @@ def scan_source(
     session.commit()
     seen: set[str] = set()
     errors: list[dict[str, Any]] = []
+    error_count = 0
+
+    def record_error(path: Path, exc: OSError) -> None:
+        nonlocal error_count
+        error_count += 1
+        if len(errors) < 100:
+            errors.append({"path": path.as_posix(), "error": type(exc).__name__})
+
     try:
-        for data in iter_metadata(root, source.exclusions, max_entries):
+        for data in iter_metadata(
+            root, source.exclusions, max_entries, on_error=record_error
+        ):
             requested = control() if control else "running"
             if requested in {"pause_requested", "cancel_requested"}:
                 job.status = "paused" if requested == "pause_requested" else "cancelled"
@@ -192,16 +232,20 @@ def scan_source(
             job.cursor = data["relative_path"]
             if job.scanned_count % 500 == 0:
                 session.commit()
-        stale = session.query(FileEntry).filter_by(source_id=source.id, active=True).all()
-        for entry in stale:
-            if entry.relative_path not in seen:
-                entry.active = False
-        job.status = "completed"
+        if error_count == 0:
+            stale = session.query(FileEntry).filter_by(source_id=source.id, active=True).all()
+            for entry in stale:
+                if entry.relative_path not in seen:
+                    entry.active = False
+        job.status = "partial" if error_count else "completed"
+        job.error_count = error_count
+        job.errors = errors
         job.completed_at = utcnow()
     except (OSError, FileSafetyError) as exc:
+        error_count += 1
         errors.append({"path": job.cursor or "", "error": getattr(exc, "code", type(exc).__name__)})
         job.status = "partial" if job.scanned_count else "failed"
-        job.error_count = len(errors)
-        job.errors = errors
+        job.error_count = error_count
+        job.errors = errors[:100]
     session.commit()
     return job
