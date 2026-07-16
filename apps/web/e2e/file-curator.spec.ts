@@ -149,7 +149,7 @@ test('guided workflow recommends packs, protects files, and avoids live impact',
   await expect(page.getByText('BT advertisements and junk')).toBeVisible()
   await expect(page.getByLabel('Additional junk keywords')).toHaveCount(0)
   await page.getByRole('button', { name: 'Choose name changes' }).click()
-  await expect(page.getByLabel('Keywords to remove from file name')).toBeVisible()
+  await expect(page.getByLabel('Workflow-specific keywords')).toBeVisible()
   await page.getByRole('button', { name: 'Protect files' }).click()
   await page.getByLabel('Workflow protected paths').fill('already-organized, favorites')
   await page.getByRole('button', { name: 'Confirm rules' }).click()
@@ -173,6 +173,44 @@ test('guided workflow recommends packs, protects files, and avoids live impact',
   await expect(page.getByText('Developer options (JSON)')).toBeVisible()
   await page.getByRole('button', { name: 'Standard' }).click()
   await expect(page.getByText('Developer options (JSON)')).toHaveCount(0)
+})
+
+test('name cleanup library versions rules and supports multi-pack workflow selection', async ({ page, request }) => {
+  const packName = `E2E name cleanup ${Date.now()}`
+  await page.goto('/')
+  await expect(page.getByText('API connected')).toBeVisible()
+  await page.getByRole('button', { name: 'Name cleanup' }).click()
+  await page.getByRole('button', { name: 'New cleanup pack' }).click()
+  await page.getByLabel('Pack name').fill(packName)
+  await page.getByLabel('Rule name').fill('Remove tracker marker')
+  await page.getByLabel('Pattern or text').fill('tracker.example')
+  await page.getByRole('button', { name: 'Save new version' }).click()
+  await expect.poll(async()=>{
+    const rows=await (await request.get('/api/name-cleanup-packs')).json()
+    return rows.some((item:{name:string})=>item.name===packName)
+  }).toBe(true)
+  await page.getByLabel('Example relative path').fill('downloads/tracker.example_movie.mp4')
+  await page.getByRole('button', { name: 'Test cleanup' }).click()
+  await expect(page.locator('.cleanup-simulator pre')).toContainText('movie.mp4')
+
+  const packs = await (await request.get('/api/name-cleanup-packs')).json()
+  const created = packs.find((item:{name:string})=>item.name===packName)
+  expect(created.rules).toHaveLength(1)
+  expect(created.rules[0]).toMatchObject({kind:'remove_contains',pattern:'tracker.example'})
+
+  await page.getByRole('button', { name: 'Pipeline' }).click()
+  await page.getByRole('button', { name: 'Build manually' }).click()
+  await page.getByRole('button', { name: /Clean file names only/ }).click()
+  await page.getByRole('button', { name: 'Choose name changes' }).click()
+  const personal = page.locator('.cleanup-choice').filter({hasText:packName})
+  const general = page.locator('.cleanup-choice').filter({hasText:'General advertisement cleanup'})
+  await personal.locator('input[type=checkbox]').click()
+  await expect(personal.locator('input[type=checkbox]')).toBeChecked()
+  await general.locator('input[type=checkbox]').click()
+  await expect(general.locator('input[type=checkbox]')).toBeChecked()
+  await expect(personal.locator('.cleanup-order')).toBeVisible()
+  await expect(general.locator('.cleanup-order')).toBeVisible()
+  await page.getByLabel('Workflow-specific keywords').fill('one-off-marker')
 })
 
 test('junk rule library versions independent rules and applies a snapshot', async ({ page, request }) => {

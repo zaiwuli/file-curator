@@ -1,4 +1,4 @@
-import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, DraftWorkflowImpact, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, JunkRulePackVersion, JunkRulePackWrite, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, RulePackReference, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowLiveSummary, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateResolution, WorkflowTemplateV2 } from './types'
+import type { ApiSource, AuditLog, Backup, Batch, Diagnostics, DraftWorkflowImpact, FileGroup, FilePage, Health, JunkRulePack, JunkRulePackValidation, JunkRulePackVersion, JunkRulePackWrite, NameCleanupPack, NameCleanupPackValidation, NameCleanupPackVersion, NameCleanupPackWrite, PipelineRun, PlanSummary, Preflight, ProcessorConfig, ProcessorManifest, ReviewDecision, ReviewItem, RollbackPreview, RuleCard, RulePackReference, Schedule, StageResult, TemplateValidation, Workflow, WorkflowCapabilityManifest, WorkflowCompare, WorkflowDependency, WorkflowDiagnostics, WorkflowImpact, WorkflowLiveSummary, WorkflowPortable, WorkflowRevision, WorkflowSimulation, WorkflowTemplateResolution, WorkflowTemplateV2 } from './types'
 
 declare global { interface Window { __FILE_CURATOR_CONFIG__?: { apiBase?: string } } }
 
@@ -36,6 +36,16 @@ export const api = {
   deleteJunkRulePack: (id:string) => request<void>(`/junk-rule-packs/${id}`,{method:'DELETE'}),
   applyJunkRulePack: (id:string,workflowId:string,version?:number) => post<Workflow>(`/junk-rule-packs/${id}/apply`,{workflow_id:workflowId,version}),
   validateJunkRulePack: (pack: unknown) => post<JunkRulePackValidation>('/junk-rule-packs/validate', pack),
+  nameCleanupPacks:()=>request<NameCleanupPack[]>('/name-cleanup-packs'),
+  nameCleanupPack:(id:string,version?:number)=>request<NameCleanupPack>(`/name-cleanup-packs/${id}${version?`?version=${version}`:''}`),
+  nameCleanupPackVersions:(id:string)=>request<NameCleanupPackVersion[]>(`/name-cleanup-packs/${id}/versions`),
+  createNameCleanupPack:(pack:NameCleanupPackWrite)=>post<NameCleanupPack>('/name-cleanup-packs',pack),
+  updateNameCleanupPack:(id:string,pack:NameCleanupPackWrite)=>request<NameCleanupPack>(`/name-cleanup-packs/${id}`,{method:'PUT',body:JSON.stringify(pack)}),
+  copyNameCleanupPack:(id:string)=>post<NameCleanupPack>(`/name-cleanup-packs/${id}/copy`,{}),
+  deleteNameCleanupPack:(id:string)=>request<void>(`/name-cleanup-packs/${id}`,{method:'DELETE'}),
+  applyNameCleanupPack:(id:string,workflow_id:string,version?:number)=>post<Workflow>(`/name-cleanup-packs/${id}/apply`,{workflow_id,version}),
+  validateNameCleanupPack:(pack:unknown)=>post<NameCleanupPackValidation>('/name-cleanup-packs/validate',pack),
+  simulateNameCleanupPack:(pack:NameCleanupPack,relative_path:string)=>post<{original_path:string;proposed_name:string;reasons:string[];warnings:string[]}>('/name-cleanup-packs/simulate',{pack,relative_path}),
   workflowTemplates: () => request<WorkflowTemplateV2[]>('/workflow-templates'),
   validateTemplate: (content: string, format: 'auto'|'yaml'|'json' = 'auto') => post<TemplateValidation>('/workflow-templates/validate', { content, format }),
   resolveTemplate: (content:string,format:'auto'|'yaml'|'json'='auto',rulePackSelections:Record<string,RulePackReference[]>={})=>post<WorkflowTemplateResolution>('/workflow-templates/resolve',{content,format,rule_pack_selections:rulePackSelections}),

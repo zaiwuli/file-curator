@@ -1,4 +1,4 @@
-import { Database, FileSearch, Folder, History as HistoryIcon, LayoutDashboard, ListChecks, Play, Settings as SettingsIcon, ShieldCheck, Workflow as WorkflowIcon } from 'lucide-react'
+import { Database, FileSearch, Folder, History as HistoryIcon, LayoutDashboard, ListChecks, Play, Settings as SettingsIcon, ShieldCheck, WandSparkles, Workflow as WorkflowIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { Topbar } from '../components/Topbar'
 import { useWorkspace } from '../hooks/useWorkspace'
@@ -8,11 +8,12 @@ import { SourcesPage } from '../pages/SourcesPage'
 import { FileBrowserPage } from '../pages/FileBrowserPage'
 import { ExecutionPage, HistoryPage, PreviewPage, ReviewPage, SettingsPage } from '../pages/WorkbenchPages'
 import { JunkRulesPage } from '../pages/JunkRulesPage'
+import { NameCleanupPage } from '../pages/NameCleanupPage'
 import { WorkflowBuilderV2 } from '../pages/WorkflowBuilderV2'
 import type { Page } from '../types'
 
 const navItems: { id: Page; label: string; icon: React.ComponentType<{size?:number}> }[] = [
-  {id:'dashboard',label:'Dashboard',icon:LayoutDashboard}, {id:'sources',label:'Sources',icon:Database}, {id:'files',label:'File browser',icon:FileSearch}, {id:'pipeline',label:'Pipeline',icon:WorkflowIcon}, {id:'junk',label:'Junk rules',icon:ShieldCheck}, {id:'review',label:'Review center',icon:ListChecks}, {id:'preview',label:'Virtual preview',icon:Folder}, {id:'execution',label:'Execution',icon:Play}, {id:'history',label:'History',icon:HistoryIcon}, {id:'settings',label:'Settings',icon:SettingsIcon},
+  {id:'dashboard',label:'Dashboard',icon:LayoutDashboard}, {id:'sources',label:'Sources',icon:Database}, {id:'files',label:'File browser',icon:FileSearch}, {id:'pipeline',label:'Pipeline',icon:WorkflowIcon}, {id:'junk',label:'Junk rules',icon:ShieldCheck}, {id:'cleanup',label:'Name cleanup',icon:WandSparkles}, {id:'review',label:'Review center',icon:ListChecks}, {id:'preview',label:'Virtual preview',icon:Folder}, {id:'execution',label:'Execution',icon:Play}, {id:'history',label:'History',icon:HistoryIcon}, {id:'settings',label:'Settings',icon:SettingsIcon},
 ]
 
 export function App() {
@@ -27,6 +28,7 @@ export function App() {
     {page==='files'&&<FileBrowserPage sources={workspace.apiSources} notify={notify}/>}
     {page==='pipeline'&&<WorkflowBuilderV2 {...common} sources={workspace.apiSources} workflows={workspace.workflows} openPreview={()=>setPage('preview')}/>}
     {page==='junk'&&<JunkRulesPage {...common} workflows={workspace.workflows}/>}
+    {page==='cleanup'&&<NameCleanupPage {...common} workflows={workspace.workflows}/>}
     {page==='review'&&<ReviewPage {...common} reviews={workspace.reviews} runs={workspace.runs}/>}
     {page==='preview'&&<PreviewPage {...common} runs={workspace.runs} plans={workspace.plans}/>} 
     {page==='execution'&&<ExecutionPage {...common} plans={workspace.plans} batches={workspace.batches}/>} 

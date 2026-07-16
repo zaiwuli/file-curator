@@ -153,6 +153,80 @@ class JunkRulePackValidation(BaseModel):
     rule_count: int = 0
 
 
+class NameCleanupRule(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    enabled: bool = True
+    order: int = Field(default=0, ge=0)
+    kind: Literal[
+        "remove_contains", "remove_prefix", "remove_suffix",
+        "literal_replace", "regex_replace",
+    ]
+    pattern: str = Field(min_length=1, max_length=1000)
+    replacement: str = Field(default="", max_length=1000)
+    extensions: list[str] = []
+    path_contains: list[str] = []
+    stop_on_match: bool = False
+    examples: list[dict[str, str]] = []
+
+
+class NameCleanupPack(BaseModel):
+    id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$")
+    version: str = "1"
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    protected_names: list[str] = []
+    protected_keywords: list[str] = []
+    protected_regex: list[str] = []
+    normalize_separators: bool = True
+    normalize_width: bool = False
+    deduplicate_words: bool = True
+    max_name_length: int = Field(default=240, ge=1, le=255)
+    rules: list[NameCleanupRule] = []
+    source: Literal["built_in", "personal", "snapshot"] = "built_in"
+    read_only: bool = True
+    current_version: int = 1
+
+
+class NameCleanupPackWrite(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+    protected_names: list[str] = []
+    protected_keywords: list[str] = []
+    protected_regex: list[str] = []
+    normalize_separators: bool = True
+    normalize_width: bool = False
+    deduplicate_words: bool = True
+    max_name_length: int = Field(default=240, ge=1, le=255)
+    rules: list[NameCleanupRule] = []
+    change_note: str = Field(default="", max_length=1000)
+
+
+class NameCleanupPackVersionRead(ORMModel):
+    pack_id: str
+    version: int
+    change_note: str
+    created_at: datetime
+
+
+class NameCleanupPackApply(BaseModel):
+    workflow_id: str
+    version: int | None = Field(default=None, ge=1)
+
+
+class NameCleanupPackValidation(BaseModel):
+    valid: bool
+    errors: list[str] = []
+    warnings: list[str] = []
+    rule_count: int = 0
+
+
+class NameCleanupSimulation(BaseModel):
+    pack: NameCleanupPack
+    relative_path: str
+
+
 class Condition(BaseModel):
     field: str
     operator: Literal[
@@ -297,6 +371,7 @@ class WorkflowTemplateResolution(BaseModel):
     template: WorkflowTemplateV2 | None = None
     resolutions: list[RulePackResolution] = []
     available_rule_packs: list[JunkRulePack] = []
+    available_cleanup_packs: list[NameCleanupPack] = []
     errors: list[str] = []
     warnings: list[str] = []
     ready_to_import: bool = False

@@ -123,13 +123,35 @@ def _extract_dates(context: ProcessingContext) -> tuple[list[str], list[str]]:
     return formatted, warnings
 
 
-def _clean_name(context: ProcessingContext, options: dict[str, Any]) -> None:
+def _clean_name(context: ProcessingContext, options: dict[str, Any]) -> tuple[list[str], list[str]]:
+    from .name_cleanup import apply_cleanup_packs
+
     current = Path(context.proposed_name or context.original_name)
     stem = unicodedata.normalize("NFC", current.stem)
+    reasons: list[str] = []
+    warnings: list[str] = []
     protected_dates = [match.group(0) for match in DATE_PATTERN.finditer(stem)]
+    protected_values = [] if options.get("prepend_dates", False) or options.get("remove_dates", False) else list(protected_dates)
+    for key in ("identifier", "sequence", "episode", "quality", "resolution"):
+        value = context.fields.get(key)
+        if isinstance(value, str) and value and value in stem:
+            protected_values.append(value)
+    placeholders: dict[str, str] = {}
+    for index, value in enumerate(dict.fromkeys(protected_values)):
+        placeholder = chr(0xE000 + index)
+        stem = stem.replace(value, placeholder)
+        placeholders[placeholder] = value
     if options.get("prepend_dates", False) or options.get("remove_dates", False):
         for raw in protected_dates:
             stem = stem.replace(raw, " ")
+    stem, pack_reasons, pack_warnings = apply_cleanup_packs(
+        stem,
+        context.relative_path,
+        current.suffix,
+        list(options.get("cleanup_packs", [])),
+    )
+    reasons.extend(pack_reasons)
+    warnings.extend(pack_warnings)
     for word in options.get("remove_words", []):
         stem = re.sub(re.escape(str(word)), "", stem, flags=re.IGNORECASE)
     for prefix in options.get("remove_prefixes", []):
@@ -140,6 +162,8 @@ def _clean_name(context: ProcessingContext, options: dict[str, Any]) -> None:
             stem = stem[: -len(str(suffix))]
     for replacement in options.get("replacements", []):
         stem = re.sub(replacement.get("pattern", "(?!)"), replacement.get("replacement", ""), stem)
+    for placeholder, value in placeholders.items():
+        stem = stem.replace(placeholder, value)
     if options.get("normalize_separators", True):
         stem = re.sub(r"[._]+", " ", stem)
     if options.get("prepend_dates", False) and protected_dates:
@@ -147,7 +171,13 @@ def _clean_name(context: ProcessingContext, options: dict[str, Any]) -> None:
         stem = f"{dates} {stem}"
     stem = re.sub(r"\s+", " ", stem).strip(" ._-")
     stem = INVALID_NAME.sub(options.get("invalid_replacement", "_"), stem)
+    if not stem:
+        warnings.append("cleanup.empty_name")
+        stem = current.stem
+    if len(stem + current.suffix) > 255:
+        warnings.append("cleanup.path_too_long")
     context.proposed_name = stem + current.suffix.lower()
+    return reasons, warnings
 
 
 def _apply_action(
@@ -170,7 +200,10 @@ def _apply_action(
         dates, warnings = _extract_dates(context)
         status = "matched" if dates else "skipped"
     elif action.kind == "clean_name":
-        _clean_name(context, options)
+        cleanup_reasons, warnings = _clean_name(context, options)
+        reasons.extend(cleanup_reasons)
+        if warnings:
+            status = "review"
     elif action.kind == "remove_number_patterns":
         current = Path(context.proposed_name or context.original_name)
         stem = current.stem

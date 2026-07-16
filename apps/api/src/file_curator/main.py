@@ -22,6 +22,8 @@ from .db import (
     FileGroup,
     JunkRulePackRecord,
     JunkRulePackVersion,
+    NameCleanupPackRecord,
+    NameCleanupPackVersion,
     PipelineRun,
     Plan,
     ReviewDecision,
@@ -34,6 +36,12 @@ from .db import (
 )
 from .filesystem import FileSafetyError, normalize_root, probe_capabilities, resolve_inside
 from .junk_rules import DEFAULT_JUNK_PACK, junk_pack_dict
+from .name_cleanup import (
+    BUILTIN_CLEANUP_PACKS,
+    apply_cleanup_packs,
+    cleanup_pack_dict,
+    validate_cleanup_pack,
+)
 from .processors import ProcessingContext, create_default_registry
 from .schemas import (
     AuditRead,
@@ -54,6 +62,12 @@ from .schemas import (
     JunkRulePackVersionRead,
     JunkRulePackWrite,
     ManualPlanCreate,
+    NameCleanupPack,
+    NameCleanupPackApply,
+    NameCleanupPackValidation,
+    NameCleanupPackVersionRead,
+    NameCleanupPackWrite,
+    NameCleanupSimulation,
     PipelineRunCreate,
     PipelineRunRead,
     PlanCreate,
@@ -289,6 +303,147 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         return value.model_dump(mode="json", exclude={"read_only", "current_version"})
 
+    def personal_cleanup_pack(
+        record: NameCleanupPackRecord, version: NameCleanupPackVersion
+    ) -> dict[str, Any]:
+        return {
+            **version.payload,
+            "id": record.id,
+            "version": str(version.version),
+            "source": "personal",
+            "read_only": False,
+            "current_version": record.current_version,
+        }
+
+    def cleanup_pack_version(
+        pack_id: str, version: int | None, session: Session
+    ) -> dict[str, Any]:
+        builtin = next((item for item in BUILTIN_CLEANUP_PACKS if item.id == pack_id), None)
+        if builtin is not None:
+            if version not in {None, 1}:
+                raise HTTPException(404, detail="cleanup_pack_versions.not_found")
+            return cleanup_pack_dict(builtin)
+        record = require(NameCleanupPackRecord, pack_id, session)
+        selected_version = version or record.current_version
+        row = session.query(NameCleanupPackVersion).filter_by(
+            pack_id=record.id, version=selected_version
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(404, detail="cleanup_pack_versions.not_found")
+        return personal_cleanup_pack(record, row)
+
+    def cleanup_packs(session: Session) -> list[dict[str, Any]]:
+        values = [cleanup_pack_dict(item) for item in BUILTIN_CLEANUP_PACKS]
+        records = session.query(NameCleanupPackRecord).order_by(
+            NameCleanupPackRecord.name
+        ).all()
+        for record in records:
+            version = session.query(NameCleanupPackVersion).filter_by(
+                pack_id=record.id, version=record.current_version
+            ).one()
+            values.append(personal_cleanup_pack(record, version))
+        return values
+
+    def write_cleanup_pack_payload(
+        pack_id: str, version: int, payload: NameCleanupPackWrite
+    ) -> dict[str, Any]:
+        value = NameCleanupPack(
+            id=pack_id,
+            version=str(version),
+            name=payload.name,
+            description=payload.description,
+            protected_names=payload.protected_names,
+            protected_keywords=payload.protected_keywords,
+            protected_regex=payload.protected_regex,
+            normalize_separators=payload.normalize_separators,
+            normalize_width=payload.normalize_width,
+            deduplicate_words=payload.deduplicate_words,
+            max_name_length=payload.max_name_length,
+            rules=payload.rules,
+            source="personal",
+            read_only=False,
+            current_version=version,
+        )
+        validation = validate_cleanup_pack(value)
+        if not validation.valid:
+            raise HTTPException(
+                422, detail={"code": "cleanup.pack_invalid", "errors": validation.errors}
+            )
+        return value.model_dump(mode="json", exclude={"read_only", "current_version"})
+
+    def resolve_template_cleanup_packs(
+        template: WorkflowTemplateV2,
+        selections: dict[str, list[Any]],
+        session: Session,
+    ) -> tuple[WorkflowTemplateV2, list[RulePackResolution]]:
+        resolved_template = deepcopy(template)
+        resolutions: list[RulePackResolution] = []
+        for stage in resolved_template.stages:
+            for rule in stage.rules:
+                for action in rule.actions:
+                    if action.kind != "clean_name":
+                        continue
+                    refs = []
+                    for item in action.options.get("cleanup_pack_refs", []):
+                        if isinstance(item, dict) and item.get("pack_id") and item.get("version"):
+                            refs.append({
+                                "pack_id": str(item["pack_id"]),
+                                "version": int(item["version"]),
+                            })
+                    if selections.get(rule.id):
+                        refs = [
+                            {"pack_id": item.pack_id, "version": item.version}
+                            for item in selections[rule.id]
+                        ]
+                    snapshots: list[dict[str, Any]] = []
+                    resolved: list[dict[str, Any]] = []
+                    missing: list[dict[str, Any]] = []
+                    for reference in refs:
+                        try:
+                            snapshot = cleanup_pack_version(
+                                str(reference["pack_id"]), int(str(reference["version"])), session
+                            )
+                        except HTTPException:
+                            missing.append(reference)
+                            continue
+                        snapshot["source"] = "snapshot"
+                        snapshot["read_only"] = True
+                        snapshots.append(snapshot)
+                        resolved.append(reference)
+                    embedded = action.options.get("embedded_cleanup_packs", [])
+                    embedded_count = 0
+                    for index, value in enumerate(embedded):
+                        if not isinstance(value, dict):
+                            continue
+                        candidate = NameCleanupPack.model_validate({
+                            **value,
+                            "id": value.get("id") or f"embedded-cleanup-{rule.id}-{index + 1}",
+                            "source": "snapshot", "read_only": True,
+                        })
+                        validation = validate_cleanup_pack(candidate)
+                        if validation.valid:
+                            snapshots.append(candidate.model_dump(mode="json"))
+                            embedded_count += 1
+                    if not refs and not embedded and action.options.get("cleanup_packs"):
+                        snapshots = deepcopy(action.options["cleanup_packs"])
+                        resolved = [
+                            {"pack_id": str(item["id"]), "version": int(item.get("version", 1))}
+                            for item in snapshots if isinstance(item, dict) and item.get("id")
+                        ]
+                    if snapshots:
+                        action.options["cleanup_packs"] = snapshots
+                        action.options["cleanup_pack_refs"] = resolved
+                    action.options.pop("embedded_cleanup_packs", None)
+                    if refs or embedded:
+                        status = "missing" if missing else "embedded" if embedded_count and not refs else "resolved"
+                        resolutions.append(RulePackResolution(
+                            rule_id=rule.id, status=status, requested=refs,
+                            resolved=resolved, missing=missing,
+                            embedded_count=embedded_count,
+                            message="Name cleanup packs are resolved and pinned." if not missing else "Some name cleanup packs or versions are unavailable.",
+                        ))
+        return resolved_template, resolutions
+
     def resolve_template_rule_packs(
         template: WorkflowTemplateV2,
         selections: dict[str, list[Any]],
@@ -433,6 +588,163 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         message=message,
                     ))
         return resolved_template, resolutions
+
+    @app.get("/api/name-cleanup-packs", response_model=list[NameCleanupPack])
+    def list_name_cleanup_packs(session: Session = Depends(session_dependency)):
+        return cleanup_packs(session)
+
+    @app.post(
+        "/api/name-cleanup-packs/validate", response_model=NameCleanupPackValidation
+    )
+    def validate_name_cleanup_pack(payload: NameCleanupPack):
+        return validate_cleanup_pack(payload)
+
+    @app.post("/api/name-cleanup-packs", response_model=NameCleanupPack, status_code=201)
+    def create_name_cleanup_pack(
+        payload: NameCleanupPackWrite, session: Session = Depends(session_dependency)
+    ):
+        record = NameCleanupPackRecord(name=payload.name, description=payload.description)
+        session.add(record)
+        session.flush()
+        value = write_cleanup_pack_payload(record.id, 1, payload)
+        version = NameCleanupPackVersion(
+            pack_id=record.id, version=1, payload=value, change_note=payload.change_note
+        )
+        session.add(version)
+        session.commit()
+        return personal_cleanup_pack(record, version)
+
+    @app.get(
+        "/api/name-cleanup-packs/{pack_id}/versions",
+        response_model=list[NameCleanupPackVersionRead],
+    )
+    def list_name_cleanup_pack_versions(
+        pack_id: str, session: Session = Depends(session_dependency)
+    ):
+        if any(item.id == pack_id for item in BUILTIN_CLEANUP_PACKS):
+            return [{"pack_id": pack_id, "version": 1, "change_note": "Built-in version", "created_at": datetime(2026, 1, 1, tzinfo=UTC)}]
+        require(NameCleanupPackRecord, pack_id, session)
+        return session.query(NameCleanupPackVersion).filter_by(pack_id=pack_id).order_by(
+            NameCleanupPackVersion.version.desc()
+        ).all()
+
+    @app.get("/api/name-cleanup-packs/{pack_id}", response_model=NameCleanupPack)
+    def get_name_cleanup_pack(
+        pack_id: str,
+        version: int | None = Query(default=None, ge=1),
+        session: Session = Depends(session_dependency),
+    ):
+        return cleanup_pack_version(pack_id, version, session)
+
+    @app.put("/api/name-cleanup-packs/{pack_id}", response_model=NameCleanupPack)
+    def update_name_cleanup_pack(
+        pack_id: str,
+        payload: NameCleanupPackWrite,
+        session: Session = Depends(session_dependency),
+    ):
+        if any(item.id == pack_id for item in BUILTIN_CLEANUP_PACKS):
+            raise HTTPException(400, detail="cleanup.builtin_read_only")
+        record = require(NameCleanupPackRecord, pack_id, session)
+        next_version = record.current_version + 1
+        value = write_cleanup_pack_payload(record.id, next_version, payload)
+        record.name = payload.name
+        record.description = payload.description
+        record.current_version = next_version
+        version = NameCleanupPackVersion(
+            pack_id=record.id, version=next_version, payload=value,
+            change_note=payload.change_note,
+        )
+        session.add(version)
+        session.commit()
+        return personal_cleanup_pack(record, version)
+
+    @app.post(
+        "/api/name-cleanup-packs/{pack_id}/copy",
+        response_model=NameCleanupPack,
+        status_code=201,
+    )
+    def copy_name_cleanup_pack(
+        pack_id: str, session: Session = Depends(session_dependency)
+    ):
+        source = cleanup_pack_version(pack_id, None, session)
+        payload = NameCleanupPackWrite.model_validate({
+            **source, "name": f"{source['name']} copy",
+            "change_note": f"Copied from {pack_id}",
+        })
+        record = NameCleanupPackRecord(name=payload.name, description=payload.description)
+        session.add(record)
+        session.flush()
+        value = write_cleanup_pack_payload(record.id, 1, payload)
+        version = NameCleanupPackVersion(
+            pack_id=record.id, version=1, payload=value, change_note=payload.change_note
+        )
+        session.add(version)
+        session.commit()
+        return personal_cleanup_pack(record, version)
+
+    @app.delete("/api/name-cleanup-packs/{pack_id}", status_code=204)
+    def delete_name_cleanup_pack(
+        pack_id: str, session: Session = Depends(session_dependency)
+    ):
+        if any(item.id == pack_id for item in BUILTIN_CLEANUP_PACKS):
+            raise HTTPException(400, detail="cleanup.builtin_read_only")
+        session.delete(require(NameCleanupPackRecord, pack_id, session))
+        session.commit()
+
+    @app.post("/api/name-cleanup-packs/simulate")
+    def simulate_name_cleanup(payload: NameCleanupSimulation):
+        path = Path(payload.relative_path)
+        result, reasons, warnings = apply_cleanup_packs(
+            path.stem, payload.relative_path, path.suffix, [payload.pack.model_dump(mode="json")]
+        )
+        return {"original_path": payload.relative_path, "proposed_name": result + path.suffix.lower(), "reasons": reasons, "warnings": warnings}
+
+    @app.post("/api/name-cleanup-packs/{pack_id}/apply", response_model=WorkflowRead)
+    def apply_name_cleanup_pack(
+        pack_id: str,
+        payload: NameCleanupPackApply,
+        session: Session = Depends(session_dependency),
+    ):
+        snapshot = cleanup_pack_version(pack_id, payload.version, session)
+        snapshot["source"] = "snapshot"
+        snapshot["read_only"] = True
+        workflow = require(Workflow, payload.workflow_id, session)
+        revision = get_revision(session, workflow)
+        template = template_from_revision(
+            workflow.name, workflow.preset, workflow.review_policy, revision.config
+        )
+        cleaner: Any = None
+        for stage in template.stages:
+            for rule in stage.rules:
+                for action in rule.actions:
+                    if action.kind == "clean_name":
+                        cleaner = action
+                        break
+        if cleaner is None:
+            clean_stage = next(item for item in template.stages if item.id == "clean")
+            clean_stage.rules.append(RuleCard(
+                id="clean.names", name="Clean file names", order=len(clean_stage.rules),
+                actions=[WorkflowAction(kind="clean_name", options={})],
+            ))
+            cleaner = clean_stage.rules[-1].actions[0]
+        current = [item for item in cleaner.options.get("cleanup_packs", []) if item.get("id") != pack_id]
+        refs = [item for item in cleaner.options.get("cleanup_pack_refs", []) if item.get("pack_id") != pack_id]
+        current.append(snapshot)
+        refs.append({"pack_id": pack_id, "version": int(snapshot.get("version", 1))})
+        cleaner.options["cleanup_packs"] = current
+        cleaner.options["cleanup_pack_refs"] = refs
+        workflow.current_revision += 1
+        session.add(WorkflowRevision(
+            workflow_id=workflow.id, revision=workflow.current_revision,
+            config={
+                "template": template.model_dump(mode="json"),
+                "processors": [
+                    item.model_dump() for item in processors_from_template(template)
+                ],
+            },
+        ))
+        session.commit()
+        return workflow
 
     @app.get("/api/junk-rule-packs", response_model=list[JunkRulePack])
     def junk_rule_packs(session: Session = Depends(session_dependency)):
@@ -683,12 +995,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         template, resolutions = resolve_template_rule_packs(
             validation.template, payload.rule_pack_selections, session
         )
+        template, cleanup_resolutions = resolve_template_cleanup_packs(
+            template, payload.rule_pack_selections, session
+        )
+        resolutions.extend(cleanup_resolutions)
         ready = all(item.status in {"resolved", "embedded"} for item in resolutions)
         return WorkflowTemplateResolution(
             valid=True,
             template=template,
             resolutions=resolutions,
             available_rule_packs=junk_rule_packs(session),
+            available_cleanup_packs=cleanup_packs(session),
             errors=[],
             warnings=validation.warnings,
             ready_to_import=ready,
@@ -708,6 +1025,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         template, resolutions = resolve_template_rule_packs(
             validation.template, payload.rule_pack_selections, session
         )
+        template, cleanup_resolutions = resolve_template_cleanup_packs(
+            template, payload.rule_pack_selections, session
+        )
+        resolutions.extend(cleanup_resolutions)
         unresolved = [
             item for item in resolutions if item.status not in {"resolved", "embedded"}
         ]
